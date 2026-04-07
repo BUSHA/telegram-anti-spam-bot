@@ -27,6 +27,13 @@ type TelegramChatMemberUpdate = {
   };
 };
 
+type TelegramCallbackQuery = {
+  id: string;
+  from: { id: number; username?: string; first_name?: string; last_name?: string };
+  data?: string;
+  message?: { message_id: number; text?: string; chat: { id: number } };
+};
+
 type LogMeta = {
   messageText?: string;
   matchedTerms?: string[];
@@ -49,6 +56,7 @@ type RuntimeSettings = {
   softKeywords: string[];
   safeMode: boolean;
   webhookPathToken: string;
+  adminUserId: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -268,6 +276,11 @@ async function ensureSchema(db: D1Database): Promise<void> {
           .bind('WEBHOOK_PATH_TOKEN', crypto.randomUUID())
           .run();
       }
+
+      const adminUserIdSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('ADMIN_USER_ID').first();
+      if (!adminUserIdSetting) {
+        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('ADMIN_USER_ID', '').run();
+      }
     })().catch((err) => {
       schemaEnsuredPromise = null;
       throw err;
@@ -295,11 +308,13 @@ async function logAction(
   userId: number | null,
   details: string,
   meta: LogMeta | null = null
-): Promise<void> {
-  await db
+): Promise<number | null> {
+  const result = await db
     .prepare('INSERT INTO logs(action, user_id, details, meta_json) VALUES(?, ?, ?, ?)')
     .bind(action, userId, details, meta ? JSON.stringify(meta) : null)
     .run();
+  const raw = (result as { meta?: { last_row_id?: number } }).meta?.last_row_id;
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
 }
 
 async function telegramApi<T>(
@@ -319,8 +334,71 @@ async function setWebhook(token: string, url: string, secret: string): Promise<T
   return telegramApi<boolean>(token, 'setWebhook', {
     url,
     secret_token: secret,
-    allowed_updates: ['message', 'my_chat_member']
+    allowed_updates: ['message', 'my_chat_member', 'chat_member', 'callback_query']
   });
+}
+
+async function answerCallbackQuery(token: string, callbackQueryId: string, text: string): Promise<void> {
+  try {
+    await telegramApi<boolean>(token, 'answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      text
+    });
+  } catch {
+    // Ignore callback acknowledgement failures.
+  }
+}
+
+async function sendAdminMessage(
+  token: string,
+  adminUserId: string,
+  text: string,
+  buttons: Array<Array<{ text: string; callback_data: string }>> = []
+): Promise<void> {
+  if (!adminUserId) return;
+  try {
+    const payload: Record<string, unknown> = {
+      chat_id: adminUserId,
+      text,
+      disable_web_page_preview: true
+    };
+    if (buttons.length > 0) payload.reply_markup = { inline_keyboard: buttons };
+    await telegramApi<boolean>(token, 'sendMessage', payload);
+  } catch {
+    // Ignore admin notification delivery failures.
+  }
+}
+
+async function markCallbackMessageProcessed(
+  token: string,
+  callbackQuery: TelegramCallbackQuery,
+  statusText: string
+): Promise<void> {
+  const message = callbackQuery.message;
+  if (!message) return;
+
+  try {
+    await telegramApi<boolean>(token, 'editMessageReplyMarkup', {
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      reply_markup: { inline_keyboard: [] }
+    });
+  } catch {
+    // Ignore cleanup errors.
+  }
+
+  if (!message.text) return;
+  if (/\n\nStatus:/u.test(message.text)) return;
+
+  try {
+    await telegramApi<boolean>(token, 'editMessageText', {
+      chat_id: message.chat.id,
+      message_id: message.message_id,
+      text: `${message.text}\n\nStatus: ${statusText}`
+    });
+  } catch {
+    // Ignore edit text errors.
+  }
 }
 
 async function getBlacklist(
@@ -448,8 +526,16 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?)')
-    .bind('TELEGRAM_TOKEN', 'CHAT_ID', 'WEBHOOK_SECRET', 'SOFT_SUSPICIOUS_KEYWORDS', 'SAFE_MODE', 'WEBHOOK_PATH_TOKEN')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?)')
+    .bind(
+      'TELEGRAM_TOKEN',
+      'CHAT_ID',
+      'WEBHOOK_SECRET',
+      'SOFT_SUSPICIOUS_KEYWORDS',
+      'SAFE_MODE',
+      'WEBHOOK_PATH_TOKEN',
+      'ADMIN_USER_ID'
+    )
     .all<{ key: string; value: string }>();
 
   const map = new Map<string, string>();
@@ -461,6 +547,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   const softKeywords = parseSoftKeywords(map.get('SOFT_SUSPICIOUS_KEYWORDS') ?? null);
   const safeMode = (map.get('SAFE_MODE') ?? '0').trim() === '1';
   const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
+  const adminUserId = (map.get('ADMIN_USER_ID') ?? '').trim();
 
   if (!token || !chatId || !secret || !webhookPathToken) {
     RUNTIME_SETTINGS_CACHE.value = null;
@@ -468,7 +555,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
     return null;
   }
 
-  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken };
+  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken, adminUserId };
   RUNTIME_SETTINGS_CACHE.value = value;
   RUNTIME_SETTINGS_CACHE.expiresAt = now + 60_000;
   return value;
@@ -483,13 +570,14 @@ async function banAndDelete(
   source: string,
   details: string,
   meta: LogMeta
-): Promise<void> {
+): Promise<{ action: string; logId: number | null }> {
   const deleteResp = await telegramApi<boolean>(token, 'deleteMessage', { chat_id: chatId, message_id: messageId });
   const banResp = await telegramApi<boolean>(token, 'banChatMember', { chat_id: chatId, user_id: userId, revoke_messages: true });
 
   const action = deleteResp.ok && banResp.ok ? 'ban_delete' : 'ban_delete_partial';
   const status = `delete=${deleteResp.ok ? 'ok' : 'fail'} ban=${banResp.ok ? 'ok' : 'fail'}`;
-  await logAction(db, action, userId, `${details} (${status})`, { ...meta, source });
+  const logId = await logAction(db, action, userId, `${details} (${status})`, { ...meta, source });
+  return { action, logId };
 }
 
 async function upsertCoreSettings(
@@ -516,6 +604,101 @@ async function upsertCoreSettings(
   await setSetting(db, 'WORKER_URL', workerUrl);
   const webhook = await setWebhook(token, `${workerUrl}/webhook/${webhookPathToken}`, secret);
   return { secret, webhook, webhookPathToken };
+}
+
+async function banDeleteQuarantineById(
+  db: D1Database,
+  settings: RuntimeSettings,
+  id: number
+): Promise<{ ok: boolean; error?: string }> {
+  const row = await db
+    .prepare('SELECT id, message_id, user_id, username, first_name, last_name, text FROM quarantine WHERE id = ?')
+    .bind(id)
+    .first<{
+      id: number;
+      message_id: number;
+      user_id: number;
+      username: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      text: string;
+    }>();
+  if (!row) return { ok: false, error: 'not found' };
+
+  const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
+  const details = `manual review ban-delete user ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; text: ${row.text}`;
+
+  if (settings.safeMode) {
+    await logAction(db, 'dry_run_manual_review', row.user_id, `SAFE MODE: would ban/delete from review queue; ${details}`, {
+      messageText: row.text,
+      user: {
+        id: row.user_id,
+        username: row.username ?? undefined,
+        firstName: row.first_name ?? undefined,
+        lastName: row.last_name ?? undefined
+      },
+      messageId: row.message_id,
+      chatId: settings.chatId,
+      source: 'manual_review_dry_run'
+    });
+    await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
+    return { ok: true };
+  }
+
+  await banAndDelete(db, settings.token, settings.chatId, row.message_id, row.user_id, 'manual_review', details, {
+    messageText: row.text,
+    user: {
+      id: row.user_id,
+      username: row.username ?? undefined,
+      firstName: row.first_name ?? undefined,
+      lastName: row.last_name ?? undefined
+    },
+    messageId: row.message_id,
+    chatId: settings.chatId
+  });
+  await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
+  return { ok: true };
+}
+
+async function approveQuarantineById(db: D1Database, id: number): Promise<{ ok: boolean; error?: string }> {
+  const existing = await db.prepare('SELECT id FROM quarantine WHERE id = ?').bind(id).first<{ id: number }>();
+  if (!existing) return { ok: false, error: 'not found' };
+  await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
+  await logAction(db, 'quarantine_approved', null, `approved quarantine id ${id}`);
+  return { ok: true };
+}
+
+async function unbanFromLogById(
+  db: D1Database,
+  settings: RuntimeSettings,
+  id: number
+): Promise<{ ok: boolean; error?: string }> {
+  const row = await db
+    .prepare('SELECT id, user_id, meta_json FROM logs WHERE id = ?')
+    .bind(id)
+    .first<{ id: number; user_id: number | null; meta_json: string | null }>();
+  if (!row) return { ok: false, error: 'not found' };
+
+  const userId = row.user_id;
+  if (!userId) return { ok: false, error: 'no user id in this history item' };
+
+  const unbanRes = await telegramApi<boolean>(settings.token, 'unbanChatMember', {
+    chat_id: settings.chatId,
+    user_id: userId,
+    only_if_banned: true
+  });
+  if (!unbanRes.ok) return { ok: false, error: unbanRes.description ?? 'unban failed' };
+
+  let username = '';
+  try {
+    const meta = row.meta_json ? (JSON.parse(row.meta_json) as LogMeta) : null;
+    if (meta?.user?.username) username = ` (@${meta.user.username})`;
+  } catch {
+    // Ignore parsing errors.
+  }
+
+  await logAction(db, 'unban', userId, `unbanned user ${userId}${username}`);
+  return { ok: true };
 }
 
 function jsonError(message: string, status = 400) {
@@ -545,7 +728,45 @@ app.post('/webhook/:pathToken', async (c) => {
   const incomingSecret = c.req.header('X-Telegram-Bot-Api-Secret-Token') ?? '';
   if (incomingSecret !== settings.secret) return jsonError('unauthorized', 401);
 
-  const update = await c.req.json<{ message?: TelegramMessage; my_chat_member?: TelegramChatMemberUpdate }>();
+  const update = await c.req.json<{
+    message?: TelegramMessage;
+    my_chat_member?: TelegramChatMemberUpdate;
+    callback_query?: TelegramCallbackQuery;
+  }>();
+  const callbackQuery = update.callback_query;
+  if (callbackQuery?.id && callbackQuery.data) {
+    if (!settings.adminUserId || String(callbackQuery.from.id) !== String(settings.adminUserId)) {
+      await answerCallbackQuery(settings.token, callbackQuery.id, 'Only configured admin can use this action');
+      return c.json({ ok: true, skipped: 'callback_not_admin' });
+    }
+
+    const data = callbackQuery.data;
+    if (data.startsWith('qr_ban:')) {
+      const id = Number(data.slice('qr_ban:'.length));
+      const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'invalid id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Done' : result.error ?? 'failed');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Banned' : `Failed: ${result.error ?? 'failed'}`);
+      return c.json({ ok: true, action: 'callback_qr_ban', result });
+    }
+    if (data.startsWith('qr_app:')) {
+      const id = Number(data.slice('qr_app:'.length));
+      const result = Number.isFinite(id) ? await approveQuarantineById(db, id) : { ok: false, error: 'invalid id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Approved' : result.error ?? 'failed');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Approved' : `Failed: ${result.error ?? 'failed'}`);
+      return c.json({ ok: true, action: 'callback_qr_app', result });
+    }
+    if (data.startsWith('lg_unban:')) {
+      const id = Number(data.slice('lg_unban:'.length));
+      const result = Number.isFinite(id) ? await unbanFromLogById(db, settings, id) : { ok: false, error: 'invalid id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Unbanned' : result.error ?? 'failed');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Unbanned' : `Failed: ${result.error ?? 'failed'}`);
+      return c.json({ ok: true, action: 'callback_lg_unban', result });
+    }
+
+    await answerCallbackQuery(settings.token, callbackQuery.id, 'Unknown action');
+    return c.json({ ok: true, skipped: 'unknown_callback_action' });
+  }
+
   const membershipUpdate = update.my_chat_member;
   if (membershipUpdate?.chat?.id && membershipUpdate.new_chat_member?.user?.is_bot) {
     const chatTitle = membershipUpdate.chat.title || membershipUpdate.chat.username || '(untitled)';
@@ -618,7 +839,7 @@ app.post('/webhook/:pathToken', async (c) => {
       return c.json({ ok: true, action: 'dry_run_hard_match', matchedTerms: hardMatchTerms });
     }
 
-    await banAndDelete(
+    const banResult = await banAndDelete(
       db,
       settings.token,
       settings.chatId,
@@ -628,6 +849,14 @@ app.post('/webhook/:pathToken', async (c) => {
       `hard match by ${userLabel} ${usernamePart}; matched: ${hardMatchTerms.join(', ')}; text: ${text}`,
       { ...metaBase, matchedTerms: hardMatchTerms }
     );
+    if (settings.adminUserId && banResult.logId) {
+      await sendAdminMessage(
+        settings.token,
+        settings.adminUserId,
+        `Hard match ban\nUser: ${userLabel} ${usernamePart}\nMatched: ${hardMatchTerms.join(', ')}\nMessage: ${text}`,
+        [[{ text: 'Unban', callback_data: `lg_unban:${banResult.logId}` }]]
+      );
+    }
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
   }
 
@@ -645,6 +874,10 @@ app.post('/webhook/:pathToken', async (c) => {
     )
     .bind(message.message_id, sender.id, sender.username ?? '', sender.first_name ?? '', sender.last_name ?? '', text)
     .run();
+  const quarantineRow = await db
+    .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
+    .bind(message.message_id, sender.id)
+    .first<{ id: number }>();
   await logAction(
     db,
     'quarantine',
@@ -652,6 +885,19 @@ app.post('/webhook/:pathToken', async (c) => {
     `soft match by ${userLabel} ${usernamePart}; matched: ${softTerms.join(', ') || 'none'}; text: ${text}`,
     { ...metaBase, matchedTerms: softTerms, softLinkMatch: softMatch.softLinkMatch, source: 'soft_match' }
   );
+  if (settings.adminUserId && quarantineRow?.id) {
+    await sendAdminMessage(
+      settings.token,
+      settings.adminUserId,
+      `Review queue item\nUser: ${userLabel} ${usernamePart}\nMatched: ${softTerms.join(', ') || 'none'}\nMessage: ${text}`,
+      [
+        [
+          { text: 'Ban & Delete', callback_data: `qr_ban:${quarantineRow.id}` },
+          { text: 'Approve', callback_data: `qr_app:${quarantineRow.id}` }
+        ]
+      ]
+    );
+  }
   return c.json({ ok: true, action: 'quarantine', matchedTerms: softTerms });
 });
 
@@ -670,6 +916,7 @@ app.get('/admin/api/settings', async (c) => {
   const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS'));
   const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
   const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
+  const adminUserId = (await getSetting(db, 'ADMIN_USER_ID')) ?? '';
   return c.json({
     ok: true,
     data: {
@@ -678,21 +925,25 @@ app.get('/admin/api/settings', async (c) => {
       workerUrl: workerUrl ?? '',
       softKeywords,
       safeMode,
-      webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : ''
+      webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : '',
+      adminUserId
     }
   });
 });
 
 app.post('/admin/api/settings', async (c) => {
   const db = c.env.DB;
-  const body = await c.req.json<{ token?: string; chatId?: string }>();
+  const body = await c.req.json<{ token?: string; chatId?: string; adminUserId?: string }>();
   const token = (body.token ?? '').trim();
   const chatId = (body.chatId ?? '').trim();
+  const adminUserId = (body.adminUserId ?? '').trim();
   if (!token || !chatId) return jsonError('token and chatId are required');
   if (!/^-?\d+$/u.test(chatId)) return jsonError('chatId must be numeric');
+  if (adminUserId && !/^\d+$/u.test(adminUserId)) return jsonError('adminUserId must be numeric');
 
   const workerUrl = new URL(c.req.url).origin;
   const { webhook, webhookPathToken } = await upsertCoreSettings(db, token, chatId, workerUrl);
+  await setSetting(db, 'ADMIN_USER_ID', adminUserId);
   await logAction(db, 'settings_updated', null, `chat ${chatId}, webhook ${webhook.ok ? 'ok' : 'failed'}`);
 
   return c.json({
@@ -700,7 +951,8 @@ app.post('/admin/api/settings', async (c) => {
     data: {
       webhookOk: webhook.ok,
       webhookDescription: webhook.description ?? '',
-      webhookPath: `/webhook/${webhookPathToken}`
+      webhookPath: `/webhook/${webhookPathToken}`,
+      adminUserId
     }
   });
 });
@@ -792,68 +1044,16 @@ app.post('/admin/api/quarantine/:id/ban-delete', async (c) => {
 
   const id = Number(c.req.param('id'));
   if (!Number.isFinite(id)) return jsonError('invalid id');
-
-  const row = await c.env.DB
-    .prepare('SELECT id, message_id, user_id, username, first_name, last_name, text FROM quarantine WHERE id = ?')
-    .bind(id)
-    .first<{
-      id: number;
-      message_id: number;
-      user_id: number;
-      username: string | null;
-      first_name: string | null;
-      last_name: string | null;
-      text: string;
-    }>();
-  if (!row) return jsonError('not found', 404);
-
-  const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
-  const details = `manual review ban-delete user ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; text: ${row.text}`;
-  if (settings.safeMode) {
-    await logAction(
-      c.env.DB,
-      'dry_run_manual_review',
-      row.user_id,
-      `SAFE MODE: would ban/delete from review queue; ${details}`,
-      {
-        messageText: row.text,
-        user: {
-          id: row.user_id,
-          username: row.username ?? undefined,
-          firstName: row.first_name ?? undefined,
-          lastName: row.last_name ?? undefined
-        },
-        messageId: row.message_id,
-        chatId: settings.chatId,
-        source: 'manual_review_dry_run'
-      }
-    );
-    await c.env.DB.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
-    return c.json({ ok: true, action: 'dry_run_manual_review' });
-  }
-
-  await banAndDelete(c.env.DB, settings.token, settings.chatId, row.message_id, row.user_id, 'manual_review', details, {
-    messageText: row.text,
-    user: {
-      id: row.user_id,
-      username: row.username ?? undefined,
-      firstName: row.first_name ?? undefined,
-      lastName: row.last_name ?? undefined
-    },
-    messageId: row.message_id,
-    chatId: settings.chatId
-  });
-
-  await c.env.DB.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
-
+  const result = await banDeleteQuarantineById(c.env.DB, settings, id);
+  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
   return c.json({ ok: true });
 });
 
 app.post('/admin/api/quarantine/:id/approve', async (c) => {
   const id = Number(c.req.param('id'));
   if (!Number.isFinite(id)) return jsonError('invalid id');
-  await c.env.DB.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
-  await logAction(c.env.DB, 'quarantine_approved', null, `approved quarantine id ${id}`);
+  const result = await approveQuarantineById(c.env.DB, id);
+  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
   return c.json({ ok: true });
 });
 
@@ -900,35 +1100,8 @@ app.post('/admin/api/logs/:id/unban', async (c) => {
 
   const settings = await getRuntimeSettings(c.env.DB);
   if (!settings) return jsonError('system is not configured', 503);
-
-  const row = await c.env.DB
-    .prepare('SELECT id, user_id, meta_json FROM logs WHERE id = ?')
-    .bind(id)
-    .first<{ id: number; user_id: number | null; meta_json: string | null }>();
-  if (!row) return jsonError('not found', 404);
-
-  const userId = row.user_id;
-  if (!userId) return jsonError('no user id in this history item');
-
-  const unbanRes = await telegramApi<boolean>(settings.token, 'unbanChatMember', {
-    chat_id: settings.chatId,
-    user_id: userId,
-    only_if_banned: true
-  });
-
-  if (!unbanRes.ok) {
-    return jsonError(unbanRes.description ?? 'unban failed', 502);
-  }
-
-  let username = '';
-  try {
-    const meta = row.meta_json ? (JSON.parse(row.meta_json) as LogMeta) : null;
-    if (meta?.user?.username) username = ` (@${meta.user.username})`;
-  } catch {
-    // Ignore parsing errors.
-  }
-
-  await logAction(c.env.DB, 'unban', userId, `unbanned user ${userId}${username}`);
+  const result = await unbanFromLogById(c.env.DB, settings, id);
+  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
   return c.json({ ok: true });
 });
 
@@ -959,6 +1132,7 @@ const ADMIN_HTML = `<!doctype html>
             <div class="grid md:grid-cols-2 gap-3">
               <input id="token" class="border rounded p-2" placeholder="Bot Token" />
               <input id="chatId" class="border rounded p-2" placeholder="Target Chat ID (e.g. -100...)" />
+              <input id="adminUserId" class="border rounded p-2 md:col-span-2" placeholder="Admin User ID (private chat with bot)" />
             </div>
             <button id="saveSettings" class="px-3 py-2 bg-blue-600 text-white rounded">Save & Set Webhook</button>
             <div id="webhookPathInfo" class="text-xs text-slate-600"></div>
@@ -1091,6 +1265,7 @@ const ADMIN_HTML = `<!doctype html>
         const data = await api('/admin/api/settings');
         $('token').value = data.data.token || '';
         $('chatId').value = data.data.chatId || '';
+        $('adminUserId').value = data.data.adminUserId || '';
         $('softKeywords').value = (data.data.softKeywords || []).join('\\n');
         $('safeMode').checked = !!data.data.safeMode;
         $('safeModeBadge').classList.toggle('hidden', !data.data.safeMode);
@@ -1104,7 +1279,8 @@ const ADMIN_HTML = `<!doctype html>
           method: 'POST',
           body: JSON.stringify({
             token: $('token').value,
-            chatId: $('chatId').value
+            chatId: $('chatId').value,
+            adminUserId: $('adminUserId').value
           })
         });
         if (data.data && data.data.webhookPath) {
