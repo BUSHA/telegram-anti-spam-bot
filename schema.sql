@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS quarantine (
   message_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
   username TEXT,
+  first_name TEXT,
+  last_name TEXT,
   text TEXT NOT NULL,
   timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(message_id, user_id)

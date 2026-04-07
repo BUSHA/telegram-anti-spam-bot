@@ -18,6 +18,15 @@ type TelegramMessage = {
   caption?: string;
 };
 
+type TelegramChatMemberUpdate = {
+  chat: { id: number; type: string; title?: string; username?: string };
+  from?: { id: number; username?: string; first_name?: string; last_name?: string };
+  new_chat_member?: {
+    status: string;
+    user?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
+  };
+};
+
 type LogMeta = {
   messageText?: string;
   matchedTerms?: string[];
@@ -38,6 +47,8 @@ type RuntimeSettings = {
   chatId: string;
   secret: string;
   softKeywords: string[];
+  safeMode: boolean;
+  webhookPathToken: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -105,6 +116,10 @@ function normalizeText(input: string): string {
 
 function normalizeForPhraseMatch(input: string): string {
   return normalizeText(input).replace(NON_WORD_RE, ' ').replace(/\s+/gu, ' ').trim();
+}
+
+function splitWords(input: string): string[] {
+  return normalizeForPhraseMatch(input).split(' ').filter(Boolean);
 }
 
 function escapeRegex(value: string): string {
@@ -192,6 +207,8 @@ async function ensureSchema(db: D1Database): Promise<void> {
             message_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             username TEXT,
+            first_name TEXT,
+            last_name TEXT,
             text TEXT NOT NULL,
             timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             UNIQUE(message_id, user_id)
@@ -217,6 +234,16 @@ async function ensureSchema(db: D1Database): Promise<void> {
       } catch {
         // Column already exists.
       }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN first_name TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN last_name TEXT').run();
+      } catch {
+        // Column already exists.
+      }
 
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)').run();
@@ -226,6 +253,19 @@ async function ensureSchema(db: D1Database): Promise<void> {
         await db
           .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
           .bind('SOFT_SUSPICIOUS_KEYWORDS', serializeSoftKeywords(DEFAULT_SOFT_SUSPICIOUS_KEYWORDS))
+          .run();
+      }
+
+      const safeModeSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('SAFE_MODE').first();
+      if (!safeModeSetting) {
+        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('SAFE_MODE', '0').run();
+      }
+
+      const webhookPathSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('WEBHOOK_PATH_TOKEN').first();
+      if (!webhookPathSetting) {
+        await db
+          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
+          .bind('WEBHOOK_PATH_TOKEN', crypto.randomUUID())
           .run();
       }
     })().catch((err) => {
@@ -279,7 +319,7 @@ async function setWebhook(token: string, url: string, secret: string): Promise<T
   return telegramApi<boolean>(token, 'setWebhook', {
     url,
     secret_token: secret,
-    allowed_updates: ['message']
+    allowed_updates: ['message', 'my_chat_member']
   });
 }
 
@@ -305,6 +345,7 @@ function findHardMatchTerms(
   rows: Array<{ id: number; pattern: string; is_regex: number }>
 ): string[] {
   const matched = new Set<string>();
+  const textWords = splitWords(phraseText);
 
   for (const row of rows) {
     if (row.is_regex) {
@@ -319,20 +360,59 @@ function findHardMatchTerms(
 
     const normalizedPattern = normalizeForPhraseMatch(row.pattern);
     if (!normalizedPattern) continue;
-    if (phraseMatch(phraseText, normalizedPattern)) matched.add(row.pattern);
+
+    const patternWords = splitWords(normalizedPattern);
+    if (patternWords.length === 0) continue;
+
+    let found = false;
+    for (let i = 0; i <= textWords.length - patternWords.length; i += 1) {
+      let ok = true;
+      for (let j = 0; j < patternWords.length; j += 1) {
+        const pw = patternWords[j];
+        const tw = textWords[i + j];
+        if (!tw) {
+          ok = false;
+          break;
+        }
+        if (pw.length >= 3) {
+          if (!tw.startsWith(pw)) {
+            ok = false;
+            break;
+          }
+        } else if (tw !== pw) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        found = true;
+        break;
+      }
+    }
+    if (found) matched.add(row.pattern);
   }
 
   return Array.from(matched);
 }
 
-function findSoftMatches(rawText: string, phraseText: string, keywords: string[]): { terms: string[]; softLinkMatch: boolean } {
+function findSoftMatches(
+  rawText: string,
+  normalizedText: string,
+  phraseText: string,
+  keywords: string[]
+): { terms: string[]; softLinkMatch: boolean } {
   const terms = new Set<string>();
   const linkMatch = LINK_RE.test(rawText.toLowerCase());
 
   for (const keyword of keywords) {
     const normalizedKeyword = normalizeForPhraseMatch(keyword);
     if (!normalizedKeyword) continue;
-    if (phraseMatch(phraseText, normalizedKeyword)) terms.add(keyword);
+    if (normalizedKeyword.includes(' ')) {
+      if (phraseMatch(phraseText, normalizedKeyword)) terms.add(keyword);
+      continue;
+    }
+    const stem = normalizeText(keyword).trim();
+    if (stem && normalizedText.includes(stem)) terms.add(keyword);
   }
 
   return {
@@ -368,8 +448,8 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)')
-    .bind('TELEGRAM_TOKEN', 'CHAT_ID', 'WEBHOOK_SECRET', 'SOFT_SUSPICIOUS_KEYWORDS')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?)')
+    .bind('TELEGRAM_TOKEN', 'CHAT_ID', 'WEBHOOK_SECRET', 'SOFT_SUSPICIOUS_KEYWORDS', 'SAFE_MODE', 'WEBHOOK_PATH_TOKEN')
     .all<{ key: string; value: string }>();
 
   const map = new Map<string, string>();
@@ -379,14 +459,16 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   const chatId = (map.get('CHAT_ID') ?? '').trim();
   const secret = (map.get('WEBHOOK_SECRET') ?? '').trim();
   const softKeywords = parseSoftKeywords(map.get('SOFT_SUSPICIOUS_KEYWORDS') ?? null);
+  const safeMode = (map.get('SAFE_MODE') ?? '0').trim() === '1';
+  const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
 
-  if (!token || !chatId || !secret) {
+  if (!token || !chatId || !secret || !webhookPathToken) {
     RUNTIME_SETTINGS_CACHE.value = null;
     RUNTIME_SETTINGS_CACHE.expiresAt = now + 30_000;
     return null;
   }
 
-  const value: RuntimeSettings = { token, chatId, secret, softKeywords };
+  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken };
   RUNTIME_SETTINGS_CACHE.value = value;
   RUNTIME_SETTINGS_CACHE.expiresAt = now + 60_000;
   return value;
@@ -415,7 +497,7 @@ async function upsertCoreSettings(
   token: string,
   chatId: string,
   workerUrl: string
-): Promise<{ secret: string; webhook: TelegramResponse<boolean> }> {
+): Promise<{ secret: string; webhook: TelegramResponse<boolean>; webhookPathToken: string }> {
   await setSetting(db, 'TELEGRAM_TOKEN', token);
   await setSetting(db, 'CHAT_ID', chatId);
 
@@ -425,9 +507,15 @@ async function upsertCoreSettings(
     await setSetting(db, 'WEBHOOK_SECRET', secret);
   }
 
+  let webhookPathToken = await getSetting(db, 'WEBHOOK_PATH_TOKEN');
+  if (!webhookPathToken) {
+    webhookPathToken = crypto.randomUUID();
+    await setSetting(db, 'WEBHOOK_PATH_TOKEN', webhookPathToken);
+  }
+
   await setSetting(db, 'WORKER_URL', workerUrl);
-  const webhook = await setWebhook(token, `${workerUrl}/webhook`, secret);
-  return { secret, webhook };
+  const webhook = await setWebhook(token, `${workerUrl}/webhook/${webhookPathToken}`, secret);
+  return { secret, webhook, webhookPathToken };
 }
 
 function jsonError(message: string, status = 400) {
@@ -446,16 +534,39 @@ app.onError((err, c) => {
 });
 
 app.get('/health', (c) => c.json({ ok: true }));
+app.get('/favicon.ico', (c) => c.body(null, 204));
 
-app.post('/webhook', async (c) => {
+app.post('/webhook/:pathToken', async (c) => {
   const db = c.env.DB;
   const settings = await getRuntimeSettings(db);
   if (!settings) return c.json({ ok: true, skipped: 'not_configured' });
+  if (c.req.param('pathToken') !== settings.webhookPathToken) return jsonError('unauthorized', 401);
 
   const incomingSecret = c.req.header('X-Telegram-Bot-Api-Secret-Token') ?? '';
   if (incomingSecret !== settings.secret) return jsonError('unauthorized', 401);
 
-  const update = await c.req.json<{ message?: TelegramMessage }>();
+  const update = await c.req.json<{ message?: TelegramMessage; my_chat_member?: TelegramChatMemberUpdate }>();
+  const membershipUpdate = update.my_chat_member;
+  if (membershipUpdate?.chat?.id && membershipUpdate.new_chat_member?.user?.is_bot) {
+    const chatTitle = membershipUpdate.chat.title || membershipUpdate.chat.username || '(untitled)';
+    const actor = membershipUpdate.from
+      ? `${membershipUpdate.from.first_name ?? ''} ${membershipUpdate.from.last_name ?? ''}`.trim() ||
+        membershipUpdate.from.username ||
+        String(membershipUpdate.from.id)
+      : 'unknown';
+    const status = membershipUpdate.new_chat_member.status || 'unknown';
+    await logAction(
+      db,
+      'chat_membership_update',
+      null,
+      `bot status "${status}" in chat ${membershipUpdate.chat.id} (${chatTitle}); changed by ${actor}`,
+      {
+        chatId: String(membershipUpdate.chat.id)
+      }
+    );
+    return c.json({ ok: true, action: 'chat_membership_update', chatId: membershipUpdate.chat.id, status });
+  }
+
   const message = update.message;
   if (!message) return c.json({ ok: true, skipped: 'no_message' });
   if (String(message.chat.id) !== String(settings.chatId)) return c.json({ ok: true, skipped: 'wrong_chat' });
@@ -479,14 +590,6 @@ app.post('/webhook', async (c) => {
 
   const blacklist = await getBlacklist(db);
   const hardMatchTerms = findHardMatchTerms(normalized, phraseText, blacklist);
-  const softMatch = findSoftMatches(text, phraseText, settings.softKeywords);
-
-  if (hardMatchTerms.length === 0 && softMatch.terms.length === 0 && !softMatch.softLinkMatch) {
-    return c.json({ ok: true, action: 'allow' });
-  }
-
-  if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
-
   const userLabel = `${sender.first_name ?? ''} ${sender.last_name ?? ''}`.trim() || String(sender.id);
   const usernamePart = sender.username ? `(@${sender.username})` : '(no username)';
   const metaBase: LogMeta = {
@@ -502,6 +605,19 @@ app.post('/webhook', async (c) => {
   };
 
   if (hardMatchTerms.length > 0) {
+    if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
+
+    if (settings.safeMode) {
+      await logAction(
+        db,
+        'dry_run_hard_match',
+        sender.id,
+        `SAFE MODE: would ban/delete user ${userLabel} ${usernamePart}; matched: ${hardMatchTerms.join(', ')}; text: ${text}`,
+        { ...metaBase, matchedTerms: hardMatchTerms, source: 'hard_match_dry_run' }
+      );
+      return c.json({ ok: true, action: 'dry_run_hard_match', matchedTerms: hardMatchTerms });
+    }
+
     await banAndDelete(
       db,
       settings.token,
@@ -515,10 +631,19 @@ app.post('/webhook', async (c) => {
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
   }
 
+  const softMatch = findSoftMatches(text, normalized, phraseText, settings.softKeywords);
+  if (softMatch.terms.length === 0 && !softMatch.softLinkMatch) {
+    return c.json({ ok: true, action: 'allow' });
+  }
+
+  if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
+
   const softTerms = softMatch.softLinkMatch ? [...softMatch.terms, '[link]'] : softMatch.terms;
   await db
-    .prepare('INSERT INTO quarantine(message_id, user_id, username, text) VALUES(?, ?, ?, ?) ON CONFLICT DO NOTHING')
-    .bind(message.message_id, sender.id, sender.username ?? '', text)
+    .prepare(
+      'INSERT INTO quarantine(message_id, user_id, username, first_name, last_name, text) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
+    )
+    .bind(message.message_id, sender.id, sender.username ?? '', sender.first_name ?? '', sender.last_name ?? '', text)
     .run();
   await logAction(
     db,
@@ -529,6 +654,8 @@ app.post('/webhook', async (c) => {
   );
   return c.json({ ok: true, action: 'quarantine', matchedTerms: softTerms });
 });
+
+app.post('/webhook', (c) => jsonError('not_found', 404));
 
 app.get('/admin', (c) => {
   return c.html(ADMIN_HTML);
@@ -541,13 +668,17 @@ app.get('/admin/api/settings', async (c) => {
   const chatId = await getSetting(db, 'CHAT_ID');
   const workerUrl = await getSetting(db, 'WORKER_URL');
   const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS'));
+  const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
+  const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
   return c.json({
     ok: true,
     data: {
       token: token ?? '',
       chatId: chatId ?? '',
       workerUrl: workerUrl ?? '',
-      softKeywords
+      softKeywords,
+      safeMode,
+      webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : ''
     }
   });
 });
@@ -561,20 +692,21 @@ app.post('/admin/api/settings', async (c) => {
   if (!/^-?\d+$/u.test(chatId)) return jsonError('chatId must be numeric');
 
   const workerUrl = new URL(c.req.url).origin;
-  const { webhook } = await upsertCoreSettings(db, token, chatId, workerUrl);
+  const { webhook, webhookPathToken } = await upsertCoreSettings(db, token, chatId, workerUrl);
   await logAction(db, 'settings_updated', null, `chat ${chatId}, webhook ${webhook.ok ? 'ok' : 'failed'}`);
 
   return c.json({
     ok: true,
     data: {
       webhookOk: webhook.ok,
-      webhookDescription: webhook.description ?? ''
+      webhookDescription: webhook.description ?? '',
+      webhookPath: `/webhook/${webhookPathToken}`
     }
   });
 });
 
-app.post('/admin/api/settings/soft-keywords', async (c) => {
-  const body = await c.req.json<{ keywords?: string[] | string }>();
+app.post('/admin/api/settings/moderation', async (c) => {
+  const body = await c.req.json<{ keywords?: string[] | string; safeMode?: boolean }>();
 
   let list: string[] = [];
   if (Array.isArray(body.keywords)) {
@@ -589,8 +721,14 @@ app.post('/admin/api/settings/soft-keywords', async (c) => {
   if (list.length === 0) return jsonError('keywords are required');
 
   await setSetting(c.env.DB, 'SOFT_SUSPICIOUS_KEYWORDS', serializeSoftKeywords(list));
-  await logAction(c.env.DB, 'soft_keywords_updated', null, `updated soft keywords (${list.length})`);
-  return c.json({ ok: true, data: { keywords: list } });
+  await setSetting(c.env.DB, 'SAFE_MODE', body.safeMode ? '1' : '0');
+  await logAction(
+    c.env.DB,
+    'soft_keywords_updated',
+    null,
+    `updated moderation settings: soft keywords (${list.length}), safe mode ${body.safeMode ? 'on' : 'off'}`
+  );
+  return c.json({ ok: true, data: { keywords: list, safeMode: !!body.safeMode } });
 });
 
 app.get('/admin/api/blacklist', async (c) => {
@@ -638,7 +776,9 @@ app.get('/admin/api/quarantine', async (c) => {
   const { page, pageSize, offset } = parsePagination(c.req.raw, 20, 100);
   const [rows, totalRow] = await Promise.all([
     c.env.DB
-      .prepare('SELECT id, message_id, user_id, username, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?')
+      .prepare(
+        'SELECT id, message_id, user_id, username, first_name, last_name, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?'
+      )
       .bind(pageSize, offset)
       .all(),
     c.env.DB.prepare('SELECT COUNT(*) AS total FROM quarantine').first<{ total: number }>()
@@ -654,15 +794,52 @@ app.post('/admin/api/quarantine/:id/ban-delete', async (c) => {
   if (!Number.isFinite(id)) return jsonError('invalid id');
 
   const row = await c.env.DB
-    .prepare('SELECT id, message_id, user_id, username, text FROM quarantine WHERE id = ?')
+    .prepare('SELECT id, message_id, user_id, username, first_name, last_name, text FROM quarantine WHERE id = ?')
     .bind(id)
-    .first<{ id: number; message_id: number; user_id: number; username: string | null; text: string }>();
+    .first<{
+      id: number;
+      message_id: number;
+      user_id: number;
+      username: string | null;
+      first_name: string | null;
+      last_name: string | null;
+      text: string;
+    }>();
   if (!row) return jsonError('not found', 404);
 
-  const details = `manual review ban-delete user ${row.user_id}${row.username ? ` (@${row.username})` : ''}; text: ${row.text}`;
+  const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
+  const details = `manual review ban-delete user ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; text: ${row.text}`;
+  if (settings.safeMode) {
+    await logAction(
+      c.env.DB,
+      'dry_run_manual_review',
+      row.user_id,
+      `SAFE MODE: would ban/delete from review queue; ${details}`,
+      {
+        messageText: row.text,
+        user: {
+          id: row.user_id,
+          username: row.username ?? undefined,
+          firstName: row.first_name ?? undefined,
+          lastName: row.last_name ?? undefined
+        },
+        messageId: row.message_id,
+        chatId: settings.chatId,
+        source: 'manual_review_dry_run'
+      }
+    );
+    await c.env.DB.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
+    return c.json({ ok: true, action: 'dry_run_manual_review' });
+  }
+
   await banAndDelete(c.env.DB, settings.token, settings.chatId, row.message_id, row.user_id, 'manual_review', details, {
     messageText: row.text,
-    user: { id: row.user_id, username: row.username ?? undefined },
+    user: {
+      id: row.user_id,
+      username: row.username ?? undefined,
+      firstName: row.first_name ?? undefined,
+      lastName: row.last_name ?? undefined
+    },
     messageId: row.message_id,
     chatId: settings.chatId
   });
@@ -767,7 +944,10 @@ const ADMIN_HTML = `<!doctype html>
     <main class="max-w-6xl mx-auto p-6 space-y-8">
       <header class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Telegram Anti-Spam Dashboard</h1>
-        <button id="refreshBtn" class="px-3 py-2 bg-slate-800 text-white rounded">Refresh</button>
+        <div class="flex items-center gap-3">
+          <span id="safeModeBadge" class="hidden px-2 py-1 rounded text-xs font-semibold bg-amber-200 text-amber-900">SAFE MODE ON</span>
+          <button id="refreshBtn" class="px-3 py-2 bg-slate-800 text-white rounded">Refresh</button>
+        </div>
       </header>
 
       <section class="bg-white rounded-lg shadow p-4 space-y-3">
@@ -781,30 +961,29 @@ const ADMIN_HTML = `<!doctype html>
               <input id="chatId" class="border rounded p-2" placeholder="Target Chat ID (e.g. -100...)" />
             </div>
             <button id="saveSettings" class="px-3 py-2 bg-blue-600 text-white rounded">Save & Set Webhook</button>
+            <div id="webhookPathInfo" class="text-xs text-slate-600"></div>
+            <label class="flex items-center gap-2 font-medium"><input id="safeMode" type="checkbox" />Safe Mode (no real ban/delete)</label>
+            <label for="softKeywords" class="block font-medium">Soft Keywords (one phrase per line)</label>
+            <textarea
+              id="softKeywords"
+              rows="5"
+              class="w-full border rounded p-2"
+              placeholder="заработ\nбыстрые деньги\n..."
+            ></textarea>
+            <button id="saveModeration" class="px-3 py-2 bg-indigo-600 text-white rounded">Save Moderation Settings</button>
+
+            <div class="pt-2 border-t">
+              <h3 class="text-lg font-semibold">Blacklist Manager</h3>
+              <div class="grid md:grid-cols-[1fr_auto_auto] gap-2 mt-2">
+                <input id="pattern" class="border rounded p-2" placeholder="Pattern or phrase" />
+                <label class="flex items-center gap-2"><input id="isRegex" type="checkbox" />Regex</label>
+                <button id="addPattern" class="px-3 py-2 bg-emerald-600 text-white rounded">Add</button>
+              </div>
+              <div id="blacklistList" class="space-y-2 mt-2"></div>
+              <div id="blacklistPager" class="flex items-center justify-between gap-2 text-sm mt-2"></div>
+            </div>
           </div>
         </details>
-
-        <div class="space-y-2">
-          <label for="softKeywords" class="block font-medium">Soft Keywords (one phrase per line)</label>
-          <textarea
-            id="softKeywords"
-            rows="5"
-            class="w-full border rounded p-2"
-            placeholder="заработ\nбыстрые деньги\n..."
-          ></textarea>
-          <button id="saveSoftKeywords" class="px-3 py-2 bg-indigo-600 text-white rounded">Save Soft Keywords</button>
-        </div>
-      </section>
-
-      <section class="bg-white rounded-lg shadow p-4 space-y-3">
-        <h2 class="text-xl font-semibold">Blacklist Manager</h2>
-        <div class="grid md:grid-cols-[1fr_auto_auto] gap-2">
-          <input id="pattern" class="border rounded p-2" placeholder="Pattern or phrase" />
-          <label class="flex items-center gap-2"><input id="isRegex" type="checkbox" />Regex</label>
-          <button id="addPattern" class="px-3 py-2 bg-emerald-600 text-white rounded">Add</button>
-        </div>
-        <div id="blacklistList" class="space-y-2"></div>
-        <div id="blacklistPager" class="flex items-center justify-between gap-2 text-sm"></div>
       </section>
 
       <section class="bg-white rounded-lg shadow p-4 space-y-3">
@@ -913,25 +1092,35 @@ const ADMIN_HTML = `<!doctype html>
         $('token').value = data.data.token || '';
         $('chatId').value = data.data.chatId || '';
         $('softKeywords').value = (data.data.softKeywords || []).join('\\n');
+        $('safeMode').checked = !!data.data.safeMode;
+        $('safeModeBadge').classList.toggle('hidden', !data.data.safeMode);
+        $('webhookPathInfo').textContent = data.data.webhookPath
+          ? 'Private webhook path: ' + data.data.webhookPath
+          : '';
       }
 
       async function saveSettings() {
-        await api('/admin/api/settings', {
+        const data = await api('/admin/api/settings', {
           method: 'POST',
           body: JSON.stringify({
             token: $('token').value,
             chatId: $('chatId').value
           })
         });
+        if (data.data && data.data.webhookPath) {
+          $('webhookPathInfo').textContent = 'Private webhook path: ' + data.data.webhookPath;
+        }
       }
 
-      async function saveSoftKeywords() {
-        await api('/admin/api/settings/soft-keywords', {
+      async function saveModeration() {
+        await api('/admin/api/settings/moderation', {
           method: 'POST',
           body: JSON.stringify({
-            keywords: $('softKeywords').value
+            keywords: $('softKeywords').value,
+            safeMode: $('safeMode').checked
           })
         });
+        $('safeModeBadge').classList.toggle('hidden', !$('safeMode').checked);
       }
 
       async function loadBlacklist() {
@@ -986,10 +1175,14 @@ const ADMIN_HTML = `<!doctype html>
 
         for (const row of data.data) {
           const safeText = esc(row.text || '');
+          const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ');
+          const namePart = fullName ? ', name: ' + esc(fullName) : '';
+          const usernamePart = row.username ? ' (@' + esc(row.username) + ')' : '';
           const el = rowCard(
             '<div class="space-y-2"><div class="text-xs text-slate-500">user: ' +
               row.user_id +
-              (row.username ? ' (@' + esc(row.username) + ')' : '') +
+              usernamePart +
+              namePart +
               ', msg: ' +
               row.message_id +
               '</div>' +
@@ -1064,6 +1257,9 @@ const ADMIN_HTML = `<!doctype html>
               highlightText(messageText, matchedTerms) +
               '</div></div>'
             : '';
+          const detailsLine = messageText
+            ? ''
+            : '<div class="text-slate-600">' + esc(row.details || '') + '</div>';
 
           const canUnban = row.action === 'ban_delete' || row.action === 'ban_delete_partial';
 
@@ -1081,9 +1277,7 @@ const ADMIN_HTML = `<!doctype html>
               row.id +
               '" class="delete-log px-2 py-1 bg-slate-600 text-white rounded">Delete</button></div></div>' +
               userLine +
-              '<div class="text-slate-600">' +
-              esc(row.details || '') +
-              '</div>' +
+              detailsLine +
               matchLine +
               messageLine +
               '</div>'
@@ -1120,9 +1314,9 @@ const ADMIN_HTML = `<!doctype html>
           .then(() => alert('Saved'))
           .catch((e) => alert(e.message))
       );
-      $('saveSoftKeywords').addEventListener('click', () =>
-        saveSoftKeywords()
-          .then(() => alert('Soft keywords saved'))
+      $('saveModeration').addEventListener('click', () =>
+        saveModeration()
+          .then(() => alert('Moderation settings saved'))
           .catch((e) => alert(e.message))
       );
       $('addPattern').addEventListener('click', () => addPattern().catch((e) => alert(e.message)));
