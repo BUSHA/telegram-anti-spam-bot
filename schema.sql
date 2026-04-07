@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS logs (
   action TEXT NOT NULL,
   user_id INTEGER,
   details TEXT,
+  meta_json TEXT,
   timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
