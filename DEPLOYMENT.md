@@ -46,7 +46,7 @@ Create DB:
 npx wrangler d1 create telegram_antispam
 ```
 
-Copy the returned `database_id` and put it into [wrangler.toml](/Users/busha/projects/banner/wrangler.toml):
+Copy the returned `database_id` and put it into [wrangler.toml](wrangler.toml):
 
 ```toml
 [[d1_databases]]
