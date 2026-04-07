@@ -1,0 +1,8 @@
+name = "telegram-anti-spam-bot"
+main = "src/index.ts"
+compatibility_date = "2026-04-07"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "telegram_antispam"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
