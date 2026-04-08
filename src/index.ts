@@ -866,7 +866,7 @@ async function resolvePremoderationFailure(
     .prepare('UPDATE premoderation_challenges SET status = ?, failure_reason = ?, resolved_at = ? WHERE id = ?')
     .bind('failed', reasonLabel, nowIso, row.id)
     .run();
-  await logAction(
+  const logId = await logAction(
     db,
     'premod_failed',
     row.user_id,
@@ -882,6 +882,25 @@ async function resolvePremoderationFailure(
       chatId: row.chat_id
     }
   );
+  if (settings.adminUserId) {
+    const reasonText =
+      reason === 'timeout'
+        ? 'timeout'
+        : reason === 'wrong_digit'
+          ? `wrong answer${typeof selectedDigit === 'number' ? ` (${selectedDigit} instead of ${row.correct_digit})` : ''}`
+          : 'expired click';
+    const lines = [
+      'Pre-moderation ban',
+      `User: ${userLabel} ${usernamePart}`,
+      `Reason: ${reasonText}`,
+      `Ban: ${banRes.ok ? 'ok' : `fail${banRes.description ? ` (${banRes.description})` : ''}`}`
+    ];
+    const buttons =
+      logId && Number.isFinite(logId)
+        ? [[{ text: 'Unban', callback_data: `lg_unban:${logId}` }]]
+        : [];
+    await sendAdminMessage(settings.token, settings.adminUserId, lines.join('\n'), buttons);
+  }
 }
 
 async function resolvePremoderationSuccess(
