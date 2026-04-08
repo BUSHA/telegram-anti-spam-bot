@@ -929,24 +929,6 @@ async function resolvePremoderationSuccess(
   return { ok: true };
 }
 
-async function cleanupPassedPremoderationMessages(db: D1Database, settings: RuntimeSettings): Promise<void> {
-  const rows = await db
-    .prepare(
-      `SELECT id, captcha_message_id
-       FROM premoderation_challenges
-       WHERE status = 'passed' AND chat_id = ? AND captcha_message_id IS NOT NULL
-       ORDER BY id ASC
-       LIMIT 10`
-    )
-    .bind(settings.chatId)
-    .all<{ id: number; captcha_message_id: number | null }>();
-  for (const row of rows.results ?? []) {
-    if (!row.captcha_message_id) continue;
-    await deleteMessage(settings.token, settings.chatId, row.captcha_message_id);
-    await db.prepare('UPDATE premoderation_challenges SET captcha_message_id = NULL WHERE id = ?').bind(row.id).run();
-  }
-}
-
 async function processExpiredPremoderationChallenges(db: D1Database, settings: RuntimeSettings): Promise<void> {
   if (!settings.premoderationEnabled) return;
   const rows = await db
@@ -1394,7 +1376,6 @@ app.post('/webhook/:pathToken', async (c) => {
     callback_query?: TelegramCallbackQuery;
   }>();
   await processExpiredPremoderationChallenges(db, settings);
-  await cleanupPassedPremoderationMessages(db, settings);
   const callbackQuery = update.callback_query;
   if (callbackQuery?.id && callbackQuery.data) {
     const data = callbackQuery.data;
@@ -1537,6 +1518,7 @@ app.post('/webhook/:pathToken', async (c) => {
   if (String(message.chat.id) !== String(settings.chatId)) return c.json({ ok: true, skipped: 'wrong_chat' });
 
   if (message.new_chat_members?.length) {
+    await deleteMessage(settings.token, settings.chatId, message.message_id);
     const results = [];
     for (const member of message.new_chat_members) {
       const result = await startPremoderationForUser(db, settings, c.executionCtx, member, message.message_id);
