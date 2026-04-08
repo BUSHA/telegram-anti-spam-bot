@@ -16,6 +16,14 @@ type TelegramMessage = {
   from?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
   text?: string;
   caption?: string;
+  entities?: Array<{ type: string; offset: number; length: number }>;
+  caption_entities?: Array<{ type: string; offset: number; length: number }>;
+  reply_to_message?: {
+    message_id: number;
+    from?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
+    text?: string;
+    caption?: string;
+  };
 };
 
 type TelegramChatMemberUpdate = {
@@ -47,6 +55,15 @@ type LogMeta = {
   messageId?: number;
   chatId?: string;
   softLinkMatch?: boolean;
+  unbannedAt?: string;
+  unbannedBy?: string;
+  reporter?: {
+    id: number;
+    username?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+  reporterMessage?: string;
 };
 
 type RuntimeSettings = {
@@ -57,6 +74,7 @@ type RuntimeSettings = {
   safeMode: boolean;
   webhookPathToken: string;
   adminUserId: string;
+  botUsername: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -128,6 +146,19 @@ function normalizeForPhraseMatch(input: string): string {
 
 function splitWords(input: string): string[] {
   return normalizeForPhraseMatch(input).split(' ').filter(Boolean);
+}
+
+function hasBotMention(message: TelegramMessage, botUsername: string): boolean {
+  if (!botUsername) return false;
+  const target = `@${botUsername}`.toLowerCase();
+  const text = message.text ?? message.caption ?? '';
+  const entities = message.entities ?? message.caption_entities ?? [];
+  for (const entity of entities) {
+    if (entity.type !== 'mention') continue;
+    const mention = text.slice(entity.offset, entity.offset + entity.length).toLowerCase();
+    if (mention === target) return true;
+  }
+  return text.toLowerCase().includes(target);
 }
 
 function escapeRegex(value: string): string {
@@ -217,6 +248,11 @@ async function ensureSchema(db: D1Database): Promise<void> {
             username TEXT,
             first_name TEXT,
             last_name TEXT,
+            reporter_user_id INTEGER,
+            reporter_username TEXT,
+            reporter_first_name TEXT,
+            reporter_last_name TEXT,
+            reporter_message TEXT,
             text TEXT NOT NULL,
             timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             UNIQUE(message_id, user_id)
@@ -252,6 +288,31 @@ async function ensureSchema(db: D1Database): Promise<void> {
       } catch {
         // Column already exists.
       }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_user_id INTEGER').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_username TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_first_name TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_last_name TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_message TEXT').run();
+      } catch {
+        // Column already exists.
+      }
 
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)').run();
@@ -280,6 +341,10 @@ async function ensureSchema(db: D1Database): Promise<void> {
       const adminUserIdSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('ADMIN_USER_ID').first();
       if (!adminUserIdSetting) {
         await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('ADMIN_USER_ID', '').run();
+      }
+      const botUsernameSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('BOT_USERNAME').first();
+      if (!botUsernameSetting) {
+        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('BOT_USERNAME', '').run();
       }
     })().catch((err) => {
       schemaEnsuredPromise = null;
@@ -336,6 +401,11 @@ async function setWebhook(token: string, url: string, secret: string): Promise<T
     secret_token: secret,
     allowed_updates: ['message', 'my_chat_member', 'chat_member', 'callback_query']
   });
+}
+
+async function getBotUsername(token: string): Promise<string> {
+  const res = await telegramApi<{ username?: string }>(token, 'getMe', {});
+  return (res.result?.username ?? '').trim().toLowerCase();
 }
 
 async function answerCallbackQuery(token: string, callbackQueryId: string, text: string): Promise<void> {
@@ -526,7 +596,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?)')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(
       'TELEGRAM_TOKEN',
       'CHAT_ID',
@@ -534,7 +604,8 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
       'SOFT_SUSPICIOUS_KEYWORDS',
       'SAFE_MODE',
       'WEBHOOK_PATH_TOKEN',
-      'ADMIN_USER_ID'
+      'ADMIN_USER_ID',
+      'BOT_USERNAME'
     )
     .all<{ key: string; value: string }>();
 
@@ -548,6 +619,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   const safeMode = (map.get('SAFE_MODE') ?? '0').trim() === '1';
   const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
   const adminUserId = (map.get('ADMIN_USER_ID') ?? '').trim();
+  const botUsername = (map.get('BOT_USERNAME') ?? '').trim().toLowerCase();
 
   if (!token || !chatId || !secret || !webhookPathToken) {
     RUNTIME_SETTINGS_CACHE.value = null;
@@ -555,7 +627,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
     return null;
   }
 
-  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken, adminUserId };
+  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken, adminUserId, botUsername };
   RUNTIME_SETTINGS_CACHE.value = value;
   RUNTIME_SETTINGS_CACHE.expiresAt = now + 60_000;
   return value;
@@ -588,6 +660,8 @@ async function upsertCoreSettings(
 ): Promise<{ secret: string; webhook: TelegramResponse<boolean>; webhookPathToken: string }> {
   await setSetting(db, 'TELEGRAM_TOKEN', token);
   await setSetting(db, 'CHAT_ID', chatId);
+  const botUsername = await getBotUsername(token);
+  await setSetting(db, 'BOT_USERNAME', botUsername);
 
   let secret = await getSetting(db, 'WEBHOOK_SECRET');
   if (!secret) {
@@ -671,16 +745,28 @@ async function approveQuarantineById(db: D1Database, id: number): Promise<{ ok: 
 async function unbanFromLogById(
   db: D1Database,
   settings: RuntimeSettings,
-  id: number
+  id: number,
+  source: 'dashboard' | 'telegram_callback'
 ): Promise<{ ok: boolean; error?: string }> {
   const row = await db
-    .prepare('SELECT id, user_id, meta_json FROM logs WHERE id = ?')
+    .prepare('SELECT id, action, user_id, details, meta_json FROM logs WHERE id = ?')
     .bind(id)
-    .first<{ id: number; user_id: number | null; meta_json: string | null }>();
+    .first<{ id: number; action: string; user_id: number | null; details: string | null; meta_json: string | null }>();
   if (!row) return { ok: false, error: 'not found' };
+  if (row.action !== 'ban_delete' && row.action !== 'ban_delete_partial') {
+    return { ok: false, error: 'unban is only available for ban records' };
+  }
 
   const userId = row.user_id;
   if (!userId) return { ok: false, error: 'no user id in this history item' };
+
+  let meta: LogMeta = {};
+  try {
+    meta = row.meta_json ? (JSON.parse(row.meta_json) as LogMeta) : {};
+  } catch {
+    meta = {};
+  }
+  if (meta.unbannedAt) return { ok: true };
 
   const unbanRes = await telegramApi<boolean>(settings.token, 'unbanChatMember', {
     chat_id: settings.chatId,
@@ -689,15 +775,14 @@ async function unbanFromLogById(
   });
   if (!unbanRes.ok) return { ok: false, error: unbanRes.description ?? 'unban failed' };
 
-  let username = '';
-  try {
-    const meta = row.meta_json ? (JSON.parse(row.meta_json) as LogMeta) : null;
-    if (meta?.user?.username) username = ` (@${meta.user.username})`;
-  } catch {
-    // Ignore parsing errors.
-  }
-
-  await logAction(db, 'unban', userId, `unbanned user ${userId}${username}`);
+  const unbannedAt = new Date().toISOString();
+  const mergedMeta: LogMeta = { ...meta, unbannedAt, unbannedBy: source };
+  const cleanedDetails = (row.details ?? '').replace(/\s*\|\s*UNBANNED.*$/u, '').trim();
+  const detailsWithNote = `${cleanedDetails} | UNBANNED at ${unbannedAt} via ${source}`;
+  await db
+    .prepare('UPDATE logs SET details = ?, meta_json = ? WHERE id = ?')
+    .bind(detailsWithNote, JSON.stringify(mergedMeta), id)
+    .run();
   return { ok: true };
 }
 
@@ -757,7 +842,9 @@ app.post('/webhook/:pathToken', async (c) => {
     }
     if (data.startsWith('lg_unban:')) {
       const id = Number(data.slice('lg_unban:'.length));
-      const result = Number.isFinite(id) ? await unbanFromLogById(db, settings, id) : { ok: false, error: 'invalid id' };
+      const result = Number.isFinite(id)
+        ? await unbanFromLogById(db, settings, id, 'telegram_callback')
+        : { ok: false, error: 'invalid id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Unbanned' : result.error ?? 'failed');
       await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Unbanned' : `Failed: ${result.error ?? 'failed'}`);
       return c.json({ ok: true, action: 'callback_lg_unban', result });
@@ -858,6 +945,95 @@ app.post('/webhook/:pathToken', async (c) => {
       );
     }
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
+  }
+
+  const replied = message.reply_to_message;
+  if (replied && hasBotMention(message, settings.botUsername)) {
+    const reportedText = replied.text ?? replied.caption ?? '';
+    const reporterMessage = (message.text ?? message.caption ?? '').trim();
+    const reportedUser = replied.from;
+    if (reportedText.trim() && reportedUser && !reportedUser.is_bot) {
+      let quarantineId: number | null = null;
+      const existingRow = await db
+        .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
+        .bind(replied.message_id, reportedUser.id)
+        .first<{ id: number }>();
+
+      if (existingRow?.id) {
+        quarantineId = existingRow.id;
+      } else {
+        await db
+          .prepare(
+            'INSERT INTO quarantine(message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
+          )
+          .bind(
+            replied.message_id,
+            reportedUser.id,
+            reportedUser.username ?? '',
+            reportedUser.first_name ?? '',
+            reportedUser.last_name ?? '',
+            sender.id,
+            sender.username ?? '',
+            sender.first_name ?? '',
+            sender.last_name ?? '',
+            reporterMessage,
+            reportedText
+          )
+          .run();
+        const row = await db
+          .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
+          .bind(replied.message_id, reportedUser.id)
+          .first<{ id: number }>();
+        quarantineId = row?.id ?? null;
+      }
+
+      const reporterLabel = `${sender.first_name ?? ''} ${sender.last_name ?? ''}`.trim() || String(sender.id);
+      const reporterUsername = sender.username ? `(@${sender.username})` : '(no username)';
+      const targetLabel = `${reportedUser.first_name ?? ''} ${reportedUser.last_name ?? ''}`.trim() || String(reportedUser.id);
+      const targetUsername = reportedUser.username ? `(@${reportedUser.username})` : '(no username)';
+
+      await logAction(
+        db,
+        'quarantine_report',
+        reportedUser.id,
+        `user report by ${reporterLabel} ${reporterUsername}; target ${targetLabel} ${targetUsername}; text: ${reportedText}`,
+        {
+          messageText: reportedText,
+          matchedTerms: ['[user_report]'],
+          user: {
+            id: reportedUser.id,
+            username: reportedUser.username,
+            firstName: reportedUser.first_name,
+            lastName: reportedUser.last_name
+          },
+          reporter: {
+            id: sender.id,
+            username: sender.username,
+            firstName: sender.first_name,
+            lastName: sender.last_name
+          },
+          reporterMessage,
+          messageId: replied.message_id,
+          chatId: String(message.chat.id),
+          source: 'user_report'
+        }
+      );
+
+      if (settings.adminUserId && quarantineId) {
+        await sendAdminMessage(
+          settings.token,
+          settings.adminUserId,
+          `Spam report\nReported by: ${reporterLabel} ${reporterUsername}\nReport text: ${reporterMessage || '(empty)'}\nTarget: ${targetLabel} ${targetUsername}\nMessage: ${reportedText}`,
+          [
+            [
+              { text: 'Ban & Delete', callback_data: `qr_ban:${quarantineId}` },
+              { text: 'Approve', callback_data: `qr_app:${quarantineId}` }
+            ]
+          ]
+        );
+      }
+      return c.json({ ok: true, action: 'quarantine_report' });
+    }
   }
 
   const softMatch = findSoftMatches(text, normalized, phraseText, settings.softKeywords);
@@ -1029,7 +1205,7 @@ app.get('/admin/api/quarantine', async (c) => {
   const [rows, totalRow] = await Promise.all([
     c.env.DB
       .prepare(
-        'SELECT id, message_id, user_id, username, first_name, last_name, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?'
+        'SELECT id, message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?'
       )
       .bind(pageSize, offset)
       .all(),
@@ -1100,7 +1276,7 @@ app.post('/admin/api/logs/:id/unban', async (c) => {
 
   const settings = await getRuntimeSettings(c.env.DB);
   if (!settings) return jsonError('system is not configured', 503);
-  const result = await unbanFromLogById(c.env.DB, settings, id);
+  const result = await unbanFromLogById(c.env.DB, settings, id, 'dashboard');
   if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
   return c.json({ ok: true });
 });
@@ -1119,6 +1295,7 @@ const ADMIN_HTML = `<!doctype html>
         <h1 class="text-2xl font-bold">Telegram Anti-Spam Dashboard</h1>
         <div class="flex items-center gap-3">
           <span id="safeModeBadge" class="hidden px-2 py-1 rounded text-xs font-semibold bg-amber-200 text-amber-900">SAFE MODE ON</span>
+          <button id="logoutBtn" class="px-3 py-2 bg-slate-500 text-white rounded">Logout</button>
           <button id="refreshBtn" class="px-3 py-2 bg-slate-800 text-white rounded">Refresh</button>
         </div>
       </header>
@@ -1354,6 +1531,16 @@ const ADMIN_HTML = `<!doctype html>
           const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ');
           const namePart = fullName ? ', name: ' + esc(fullName) : '';
           const usernamePart = row.username ? ' (@' + esc(row.username) + ')' : '';
+          const reporterName = [row.reporter_first_name, row.reporter_last_name].filter(Boolean).join(' ');
+          const reporterPart = row.reporter_user_id
+            ? '<div class="text-xs text-amber-700">Reported by: ' +
+              esc(reporterName || String(row.reporter_user_id)) +
+              (row.reporter_username ? ' (@' + esc(row.reporter_username) + ')' : '') +
+              '</div>'
+            : '';
+          const reporterMessagePart = row.reporter_message
+            ? '<div class="text-xs text-amber-800">Report text: ' + esc(row.reporter_message) + '</div>'
+            : '';
           const el = rowCard(
             '<div class="space-y-2"><div class="text-xs text-slate-500">user: ' +
               row.user_id +
@@ -1362,6 +1549,8 @@ const ADMIN_HTML = `<!doctype html>
               ', msg: ' +
               row.message_id +
               '</div>' +
+              reporterPart +
+              reporterMessagePart +
               '<div>' +
               safeText +
               '</div>' +
@@ -1399,6 +1588,7 @@ const ADMIN_HTML = `<!doctype html>
         if (action === 'ban_delete') return 'Ban & Delete';
         if (action === 'ban_delete_partial') return 'Ban/Delete Partial Failure';
         if (action === 'quarantine') return 'Quarantine';
+        if (action === 'quarantine_report') return 'Spam Report';
         if (action === 'unban') return 'Unban';
         return action;
       }
@@ -1423,6 +1613,17 @@ const ADMIN_HTML = `<!doctype html>
               (meta.user.username ? ' (@' + esc(meta.user.username) + ')' : '') +
               '</div>'
             : '';
+          const reporterName = [meta?.reporter?.firstName, meta?.reporter?.lastName].filter(Boolean).join(' ');
+          const reporterLine = meta?.reporter
+            ? '<div class="text-amber-700">Reported by: <b>' +
+              esc(reporterName || String(meta.reporter.id)) +
+              '</b>' +
+              (meta.reporter.username ? ' (@' + esc(meta.reporter.username) + ')' : '') +
+              '</div>'
+            : '';
+          const reporterMessageLine = meta?.reporterMessage
+            ? '<div class="text-amber-800">Report text: ' + esc(meta.reporterMessage) + '</div>'
+            : '';
 
           const matchLine = matchedTerms.length
             ? '<div class="text-xs text-amber-700">Matched: ' + esc(matchedTerms.join(', ')) + '</div>'
@@ -1436,8 +1637,14 @@ const ADMIN_HTML = `<!doctype html>
           const detailsLine = messageText
             ? ''
             : '<div class="text-slate-600">' + esc(row.details || '') + '</div>';
+          const unbanLine = meta?.unbannedAt
+            ? '<div class="text-xs text-emerald-700">Unbanned at ' +
+              esc(meta.unbannedAt) +
+              (meta.unbannedBy ? ' via ' + esc(meta.unbannedBy) : '') +
+              '</div>'
+            : '';
 
-          const canUnban = row.action === 'ban_delete' || row.action === 'ban_delete_partial';
+          const canUnban = (row.action === 'ban_delete' || row.action === 'ban_delete_partial') && !meta?.unbannedAt;
 
           const el = rowCard(
             '<div class="space-y-2">' +
@@ -1453,8 +1660,11 @@ const ADMIN_HTML = `<!doctype html>
               row.id +
               '" class="delete-log px-2 py-1 bg-slate-600 text-white rounded">Delete</button></div></div>' +
               userLine +
+              reporterLine +
+              reporterMessageLine +
               detailsLine +
               matchLine +
+              unbanLine +
               messageLine +
               '</div>'
           );
@@ -1497,6 +1707,9 @@ const ADMIN_HTML = `<!doctype html>
       );
       $('addPattern').addEventListener('click', () => addPattern().catch((e) => alert(e.message)));
       $('refreshBtn').addEventListener('click', () => refreshAll().catch((e) => alert(e.message)));
+      $('logoutBtn').addEventListener('click', () => {
+        window.location.href = '/cdn-cgi/access/logout';
+      });
       $('includeSystemLogs').addEventListener('change', () => {
         state.logsPage = 1;
         loadLogs().catch((e) => alert(e.message));
