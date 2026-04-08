@@ -35,5 +35,25 @@ CREATE TABLE IF NOT EXISTS logs (
   timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS premoderation_challenges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  username TEXT,
+  first_name TEXT,
+  last_name TEXT,
+  join_message_id INTEGER,
+  captcha_message_id INTEGER,
+  challenge_token TEXT NOT NULL UNIQUE,
+  correct_digit INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  failure_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  expires_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_premod_expiry ON premoderation_challenges(status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_premod_user ON premoderation_challenges(chat_id, user_id, status);

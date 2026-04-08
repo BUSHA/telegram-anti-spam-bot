@@ -14,6 +14,8 @@ type TelegramMessage = {
   message_id: number;
   chat: { id: number; type: string };
   from?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
+  new_chat_members?: Array<{ id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean }>;
+  left_chat_member?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
   text?: string;
   caption?: string;
   entities?: Array<{ type: string; offset: number; length: number }>;
@@ -29,6 +31,10 @@ type TelegramMessage = {
 type TelegramChatMemberUpdate = {
   chat: { id: number; type: string; title?: string; username?: string };
   from?: { id: number; username?: string; first_name?: string; last_name?: string };
+  old_chat_member?: {
+    status: string;
+    user?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
+  };
   new_chat_member?: {
     status: string;
     user?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
@@ -75,6 +81,9 @@ type RuntimeSettings = {
   webhookPathToken: string;
   adminUserId: string;
   botUsername: string;
+  premoderationEnabled: boolean;
+  premoderationTimeoutSec: number;
+  premoderationPrompt: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -101,6 +110,44 @@ const DEFAULT_SOFT_SUSPICIOUS_KEYWORDS = [
   'казин',
   'быстрые деньги'
 ];
+const DEFAULT_PREMODERATION_TIMEOUT_SEC = 30;
+const DEFAULT_PREMODERATION_PROMPT =
+  'Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек.';
+const UA_NUMBER_WORDS: Record<number, string> = {
+  0: 'нуль',
+  1: 'один',
+  2: 'два',
+  3: 'три',
+  4: 'чотири',
+  5: "п'ять",
+  6: 'шість',
+  7: 'сім',
+  8: 'вісім',
+  9: "дев'ять",
+  10: 'десять',
+  11: 'одинадцять',
+  12: 'дванадцять',
+  13: 'тринадцять',
+  14: 'чотирнадцять',
+  15: "п'ятнадцять",
+  16: 'шістнадцять',
+  17: 'сімнадцять',
+  18: 'вісімнадцять',
+  19: "дев'ятнадцять",
+  20: 'двадцять',
+  21: 'двадцять один',
+  22: 'двадцять два',
+  23: 'двадцять три',
+  24: 'двадцять чотири',
+  25: "двадцять п'ять",
+  26: 'двадцять шість',
+  27: 'двадцять сім',
+  28: 'двадцять вісім',
+  29: "двадцять дев'ять",
+  30: 'тридцять'
+};
+const PREMOD_MIN_NUMBER = 1;
+const PREMOD_MAX_NUMBER = 30;
 
 const RUNTIME_SETTINGS_CACHE: {
   expiresAt: number;
@@ -272,6 +319,27 @@ async function ensureSchema(db: D1Database): Promise<void> {
           )`
         )
         .run();
+      await db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS premoderation_challenges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            join_message_id INTEGER,
+            captcha_message_id INTEGER,
+            challenge_token TEXT NOT NULL UNIQUE,
+            correct_digit INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            failure_reason TEXT,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            expires_at TEXT NOT NULL,
+            resolved_at TEXT
+          )`
+        )
+        .run();
 
       try {
         await db.prepare('ALTER TABLE logs ADD COLUMN meta_json TEXT').run();
@@ -316,6 +384,8 @@ async function ensureSchema(db: D1Database): Promise<void> {
 
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)').run();
+      await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_expiry ON premoderation_challenges(status, expires_at)').run();
+      await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_user ON premoderation_challenges(chat_id, user_id, status)').run();
 
       const existing = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('SOFT_SUSPICIOUS_KEYWORDS').first();
       if (!existing) {
@@ -345,6 +415,27 @@ async function ensureSchema(db: D1Database): Promise<void> {
       const botUsernameSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('BOT_USERNAME').first();
       if (!botUsernameSetting) {
         await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('BOT_USERNAME', '').run();
+      }
+      const premodEnabledSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('PREMODERATION_ENABLED').first();
+      if (!premodEnabledSetting) {
+        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('PREMODERATION_ENABLED', '0').run();
+      }
+      const premodTimeoutSetting = await db
+        .prepare('SELECT value FROM settings WHERE key = ?')
+        .bind('PREMODERATION_TIMEOUT_SEC')
+        .first();
+      if (!premodTimeoutSetting) {
+        await db
+          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
+          .bind('PREMODERATION_TIMEOUT_SEC', String(DEFAULT_PREMODERATION_TIMEOUT_SEC))
+          .run();
+      }
+      const premodPromptSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('PREMODERATION_PROMPT').first();
+      if (!premodPromptSetting) {
+        await db
+          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
+          .bind('PREMODERATION_PROMPT', DEFAULT_PREMODERATION_PROMPT)
+          .run();
       }
     })().catch((err) => {
       schemaEnsuredPromise = null;
@@ -439,6 +530,36 @@ async function sendAdminMessage(
   }
 }
 
+async function editMessageText(
+  token: string,
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  buttons: Array<Array<{ text: string; callback_data: string }>> = [],
+  parseMode?: 'HTML' | 'Markdown'
+): Promise<void> {
+  try {
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: messageId,
+      text
+    };
+    payload.reply_markup = { inline_keyboard: buttons };
+    if (parseMode) payload.parse_mode = parseMode;
+    await telegramApi<boolean>(token, 'editMessageText', payload);
+  } catch {
+    // Ignore update failures.
+  }
+}
+
+async function deleteMessage(token: string, chatId: string | number, messageId: number): Promise<void> {
+  try {
+    await telegramApi<boolean>(token, 'deleteMessage', { chat_id: chatId, message_id: messageId });
+  } catch {
+    // Ignore deletion failures.
+  }
+}
+
 async function markCallbackMessageProcessed(
   token: string,
   callbackQuery: TelegramCallbackQuery,
@@ -469,6 +590,71 @@ async function markCallbackMessageProcessed(
   } catch {
     // Ignore edit text errors.
   }
+}
+
+function randomInt(maxExclusive: number): number {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0] % maxExclusive;
+}
+
+function shuffled<T>(input: T[]): T[] {
+  const arr = [...input];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function buildPremoderationPrompt(
+  template: string,
+  userId: number,
+  username: string | undefined,
+  firstName: string | undefined,
+  correctDigit: number,
+  timeoutSec: number
+): { html: string; plain: string } {
+  const safeWord = UA_NUMBER_WORDS[correctDigit] ?? String(correctDigit);
+  const mentionText = username ? `@${username}` : (firstName?.trim() || 'користувачу');
+  const mentionHtml = username ? mentionText : `<a href="tg://user?id=${userId}">${mentionText}</a>`;
+  const normalizedTemplate = (template || DEFAULT_PREMODERATION_PROMPT).trim() || DEFAULT_PREMODERATION_PROMPT;
+  const replacements: Array<[string, string]> = [
+    ['{user}', mentionHtml],
+    ['{digit}', safeWord],
+    ['{digit_word}', safeWord],
+    ['{digit_num}', String(correctDigit)],
+    ['{seconds}', String(timeoutSec)]
+  ];
+  let html = normalizedTemplate;
+  let plain = normalizedTemplate;
+  for (const [token, value] of replacements) {
+    html = html.split(token).join(value);
+    if (token === '{user}') {
+      plain = plain.split(token).join(mentionText);
+    } else {
+      plain = plain.split(token).join(value);
+    }
+  }
+  if (!html.includes('@') && !html.includes('tg://user?id=')) {
+    html = `${mentionHtml}, ${html}`;
+    plain = `${mentionText}, ${plain}`;
+  }
+  return { html, plain };
+}
+
+function buildUserMention(userId: number, username?: string | null, firstName?: string | null): { html: string; plain: string } {
+  if (username) {
+    const handle = `@${username}`;
+    return { html: handle, plain: handle };
+  }
+  const name = (firstName ?? '').trim() || 'користувач';
+  return {
+    html: `<a href="tg://user?id=${userId}">${name}</a>`,
+    plain: name
+  };
 }
 
 async function getBlacklist(
@@ -589,6 +775,371 @@ async function isAdmin(db: D1Database, token: string, chatId: string, userId: nu
   return ids.has(userId);
 }
 
+async function restrictUserReadOnly(token: string, chatId: string, userId: number): Promise<TelegramResponse<boolean>> {
+  return telegramApi<boolean>(token, 'restrictChatMember', {
+    chat_id: chatId,
+    user_id: userId,
+    permissions: {
+      can_send_messages: false,
+      can_send_audios: false,
+      can_send_documents: false,
+      can_send_photos: false,
+      can_send_videos: false,
+      can_send_video_notes: false,
+      can_send_voice_notes: false,
+      can_send_polls: false,
+      can_send_other_messages: false,
+      can_add_web_page_previews: false,
+      can_change_info: false,
+      can_invite_users: false,
+      can_pin_messages: false
+    }
+  });
+}
+
+async function restoreUserPermissions(token: string, chatId: string, userId: number): Promise<TelegramResponse<boolean>> {
+  return telegramApi<boolean>(token, 'restrictChatMember', {
+    chat_id: chatId,
+    user_id: userId,
+    permissions: {
+      can_send_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+      can_change_info: true,
+      can_invite_users: true,
+      can_pin_messages: true
+    }
+  });
+}
+
+type PremodChallengeRow = {
+  id: number;
+  chat_id: string;
+  user_id: number;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  join_message_id: number | null;
+  captcha_message_id: number | null;
+  challenge_token: string;
+  correct_digit: number;
+  status: string;
+  failure_reason: string | null;
+  expires_at: string;
+};
+
+function userLabelFromRow(row: PremodChallengeRow): string {
+  return `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() || String(row.user_id);
+}
+
+async function resolvePremoderationFailure(
+  db: D1Database,
+  settings: RuntimeSettings,
+  row: PremodChallengeRow,
+  reason: 'timeout' | 'wrong_digit' | 'expired_click',
+  selectedDigit?: number
+): Promise<void> {
+  if (row.status !== 'pending') return;
+  const nowIso = new Date().toISOString();
+  const userLabel = userLabelFromRow(row);
+  const usernamePart = row.username ? `(@${row.username})` : '(no username)';
+  const reasonLabel = reason === 'timeout' ? 'timeout' : reason === 'wrong_digit' ? 'wrong answer' : 'expired answer';
+  const extra = typeof selectedDigit === 'number' ? `; selected ${selectedDigit}, expected ${row.correct_digit}` : '';
+
+  const banRes = await telegramApi<boolean>(settings.token, 'banChatMember', {
+    chat_id: settings.chatId,
+    user_id: row.user_id,
+    revoke_messages: true
+  });
+  await cleanupJoinMessagesForUser(db, settings.token, settings.chatId, row.user_id);
+  if (row.captcha_message_id) await deleteMessage(settings.token, settings.chatId, row.captcha_message_id);
+  if (row.join_message_id) await deleteMessage(settings.token, settings.chatId, row.join_message_id);
+
+  await db
+    .prepare('UPDATE premoderation_challenges SET status = ?, failure_reason = ?, resolved_at = ? WHERE id = ?')
+    .bind('failed', reasonLabel, nowIso, row.id)
+    .run();
+  await logAction(
+    db,
+    'premod_failed',
+    row.user_id,
+    `pre-moderation failed for ${userLabel} ${usernamePart}; reason ${reasonLabel}${extra}; ban=${banRes.ok ? 'ok' : 'fail'}`,
+    {
+      user: {
+        id: row.user_id,
+        username: row.username ?? undefined,
+        firstName: row.first_name ?? undefined,
+        lastName: row.last_name ?? undefined
+      },
+      source: 'premoderation',
+      chatId: row.chat_id
+    }
+  );
+}
+
+async function resolvePremoderationSuccess(
+  db: D1Database,
+  settings: RuntimeSettings,
+  row: PremodChallengeRow
+): Promise<{ ok: boolean; error?: string }> {
+  if (row.status !== 'pending') return { ok: false, error: 'already processed' };
+  const nowIso = new Date().toISOString();
+
+  const unmuteRes = await restoreUserPermissions(settings.token, settings.chatId, row.user_id);
+  if (!unmuteRes.ok) return { ok: false, error: unmuteRes.description ?? 'failed to remove restriction' };
+
+  await db
+    .prepare('UPDATE premoderation_challenges SET status = ?, resolved_at = ? WHERE id = ?')
+    .bind('passed', nowIso, row.id)
+    .run();
+  if (row.captcha_message_id) {
+    const mention = buildUserMention(row.user_id, row.username, row.first_name);
+    await editMessageText(
+      settings.token,
+      settings.chatId,
+      row.captcha_message_id,
+      `✅ ${mention.html}, перевірку пройдено. Ласкаво просимо!`,
+      [],
+      'HTML'
+    );
+  }
+  await logAction(
+    db,
+    'premod_passed',
+    row.user_id,
+    `pre-moderation passed for ${userLabelFromRow(row)}${row.username ? ` (@${row.username})` : ''}`,
+    {
+      user: {
+        id: row.user_id,
+        username: row.username ?? undefined,
+        firstName: row.first_name ?? undefined,
+        lastName: row.last_name ?? undefined
+      },
+      source: 'premoderation',
+      chatId: row.chat_id
+    }
+  );
+  return { ok: true };
+}
+
+async function cleanupPassedPremoderationMessages(db: D1Database, settings: RuntimeSettings): Promise<void> {
+  const rows = await db
+    .prepare(
+      `SELECT id, captcha_message_id
+       FROM premoderation_challenges
+       WHERE status = 'passed' AND chat_id = ? AND captcha_message_id IS NOT NULL
+       ORDER BY id ASC
+       LIMIT 10`
+    )
+    .bind(settings.chatId)
+    .all<{ id: number; captcha_message_id: number | null }>();
+  for (const row of rows.results ?? []) {
+    if (!row.captcha_message_id) continue;
+    await deleteMessage(settings.token, settings.chatId, row.captcha_message_id);
+    await db.prepare('UPDATE premoderation_challenges SET captcha_message_id = NULL WHERE id = ?').bind(row.id).run();
+  }
+}
+
+async function processExpiredPremoderationChallenges(db: D1Database, settings: RuntimeSettings): Promise<void> {
+  if (!settings.premoderationEnabled) return;
+  const rows = await db
+    .prepare(
+      `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+       FROM premoderation_challenges
+       WHERE status = 'pending' AND chat_id = ? AND expires_at <= ?
+       ORDER BY id ASC
+       LIMIT 10`
+    )
+    .bind(settings.chatId, new Date().toISOString())
+    .all<PremodChallengeRow>();
+  for (const row of rows.results ?? []) {
+    await resolvePremoderationFailure(db, settings, row, 'timeout');
+    if (row.captcha_message_id) {
+      await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+    }
+  }
+}
+
+async function cleanupJoinMessagesForUser(
+  db: D1Database,
+  token: string,
+  chatId: string,
+  userId: number
+): Promise<void> {
+  const rows = await db
+    .prepare(
+      `SELECT id, join_message_id
+       FROM premoderation_challenges
+       WHERE chat_id = ? AND user_id = ? AND join_message_id IS NOT NULL
+       ORDER BY id DESC
+       LIMIT 10`
+    )
+    .bind(chatId, userId)
+    .all<{ id: number; join_message_id: number | null }>();
+  for (const row of rows.results ?? []) {
+    if (!row.join_message_id) continue;
+    await deleteMessage(token, chatId, row.join_message_id);
+    await db.prepare('UPDATE premoderation_challenges SET join_message_id = NULL WHERE id = ?').bind(row.id).run();
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function schedulePremoderationTimeout(
+  executionCtx: { waitUntil(promise: Promise<unknown>): void },
+  db: D1Database,
+  chatId: string,
+  challengeToken: string,
+  timeoutSec: number
+): void {
+  executionCtx.waitUntil(
+    (async () => {
+      await sleep(Math.max(1, timeoutSec) * 1000);
+      const settings = await getRuntimeSettings(db);
+      if (!settings || settings.chatId !== chatId) return;
+      const row = await db
+        .prepare(
+          `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+           FROM premoderation_challenges
+           WHERE challenge_token = ?`
+        )
+        .bind(challengeToken)
+        .first<PremodChallengeRow>();
+      if (!row || row.status !== 'pending') return;
+      if (row.expires_at > new Date().toISOString()) return;
+      await resolvePremoderationFailure(db, settings, row, 'timeout');
+      if (row.captcha_message_id) {
+        await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+      }
+    })()
+  );
+}
+
+async function startPremoderationForUser(
+  db: D1Database,
+  settings: RuntimeSettings,
+  executionCtx: { waitUntil(promise: Promise<unknown>): void },
+  user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
+  joinMessageId?: number
+): Promise<{ ok: boolean; skipped?: string; error?: string }> {
+  if (!settings.premoderationEnabled) return { ok: true, skipped: 'premoderation_disabled' };
+  if (user.is_bot) return { ok: true, skipped: 'bot_user' };
+  if (await isAdmin(db, settings.token, settings.chatId, user.id)) return { ok: true, skipped: 'admin_user' };
+
+  const existing = await db
+    .prepare(
+      `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+       FROM premoderation_challenges
+       WHERE chat_id = ? AND user_id = ? AND status = 'pending'
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .bind(settings.chatId, user.id)
+    .first<PremodChallengeRow>();
+  if (existing) return { ok: true, skipped: 'already_pending' };
+
+  const restrictRes = await restrictUserReadOnly(settings.token, settings.chatId, user.id);
+  if (!restrictRes.ok) {
+    return { ok: false, error: restrictRes.description ?? 'failed to restrict user' };
+  }
+
+  const correctDigit = PREMOD_MIN_NUMBER + randomInt(PREMOD_MAX_NUMBER - PREMOD_MIN_NUMBER + 1);
+  const digits = new Set<number>([correctDigit]);
+  while (digits.size < 4) {
+    digits.add(PREMOD_MIN_NUMBER + randomInt(PREMOD_MAX_NUMBER - PREMOD_MIN_NUMBER + 1));
+  }
+  const options = shuffled(Array.from(digits));
+  const challengeToken = crypto.randomUUID();
+  const timeoutSec = Math.max(10, Math.min(300, Math.floor(settings.premoderationTimeoutSec || DEFAULT_PREMODERATION_TIMEOUT_SEC)));
+  const expiresAt = new Date(Date.now() + timeoutSec * 1000).toISOString();
+
+  await db
+    .prepare(
+      `INSERT INTO premoderation_challenges(
+        chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, expires_at
+      ) VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?, 'pending', ?)`
+    )
+    .bind(
+      settings.chatId,
+      user.id,
+      user.username ?? '',
+      user.first_name ?? '',
+      user.last_name ?? '',
+      joinMessageId ?? null,
+      challengeToken,
+      correctDigit,
+      expiresAt
+    )
+    .run();
+
+  const row = await db
+    .prepare(
+      `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+       FROM premoderation_challenges
+       WHERE challenge_token = ?`
+    )
+    .bind(challengeToken)
+    .first<PremodChallengeRow>();
+  if (!row) return { ok: false, error: 'challenge insert failed' };
+
+  const { html, plain } = buildPremoderationPrompt(
+    settings.premoderationPrompt,
+    user.id,
+    user.username,
+    user.first_name,
+    correctDigit,
+    timeoutSec
+  );
+  const sendRes = await telegramApi<{ message_id: number }>(settings.token, 'sendMessage', {
+    chat_id: settings.chatId,
+    text: html,
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [options.map((digit) => ({ text: String(digit), callback_data: `pm:${challengeToken}:${digit}` }))]
+    }
+  });
+
+  if (!sendRes.ok || !sendRes.result?.message_id) {
+    await restoreUserPermissions(settings.token, settings.chatId, user.id);
+    await db.prepare('DELETE FROM premoderation_challenges WHERE id = ?').bind(row.id).run();
+    return { ok: false, error: sendRes.description ?? 'failed to send captcha message' };
+  }
+
+  await db
+    .prepare('UPDATE premoderation_challenges SET captcha_message_id = ? WHERE id = ?')
+    .bind(sendRes.result.message_id, row.id)
+    .run();
+  await logAction(
+    db,
+    'premod_started',
+    user.id,
+    `pre-moderation started for ${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() +
+      `${user.username ? ` (@${user.username})` : ''}; challenge: ${plain}`,
+    {
+      user: {
+        id: user.id,
+        username: user.username,
+        firstName: user.first_name,
+        lastName: user.last_name
+      },
+      source: 'premoderation',
+      chatId: settings.chatId,
+      messageId: sendRes.result.message_id
+    }
+  );
+  schedulePremoderationTimeout(executionCtx, db, settings.chatId, challengeToken, timeoutSec);
+  return { ok: true };
+}
+
 async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | null> {
   const now = Date.now();
   if (RUNTIME_SETTINGS_CACHE.value && RUNTIME_SETTINGS_CACHE.expiresAt > now) {
@@ -596,7 +1147,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?)')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(
       'TELEGRAM_TOKEN',
       'CHAT_ID',
@@ -605,7 +1156,10 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
       'SAFE_MODE',
       'WEBHOOK_PATH_TOKEN',
       'ADMIN_USER_ID',
-      'BOT_USERNAME'
+      'BOT_USERNAME',
+      'PREMODERATION_ENABLED',
+      'PREMODERATION_TIMEOUT_SEC',
+      'PREMODERATION_PROMPT'
     )
     .all<{ key: string; value: string }>();
 
@@ -620,6 +1174,13 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
   const adminUserId = (map.get('ADMIN_USER_ID') ?? '').trim();
   const botUsername = (map.get('BOT_USERNAME') ?? '').trim().toLowerCase();
+  const premoderationEnabled = (map.get('PREMODERATION_ENABLED') ?? '0').trim() === '1';
+  const premoderationTimeoutSecRaw = Number((map.get('PREMODERATION_TIMEOUT_SEC') ?? '').trim());
+  const premoderationTimeoutSec =
+    Number.isFinite(premoderationTimeoutSecRaw) && premoderationTimeoutSecRaw > 0
+      ? Math.max(10, Math.min(300, Math.floor(premoderationTimeoutSecRaw)))
+      : DEFAULT_PREMODERATION_TIMEOUT_SEC;
+  const premoderationPrompt = (map.get('PREMODERATION_PROMPT') ?? '').trim() || DEFAULT_PREMODERATION_PROMPT;
 
   if (!token || !chatId || !secret || !webhookPathToken) {
     RUNTIME_SETTINGS_CACHE.value = null;
@@ -627,7 +1188,19 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
     return null;
   }
 
-  const value: RuntimeSettings = { token, chatId, secret, softKeywords, safeMode, webhookPathToken, adminUserId, botUsername };
+  const value: RuntimeSettings = {
+    token,
+    chatId,
+    secret,
+    softKeywords,
+    safeMode,
+    webhookPathToken,
+    adminUserId,
+    botUsername,
+    premoderationEnabled,
+    premoderationTimeoutSec,
+    premoderationPrompt
+  };
   RUNTIME_SETTINGS_CACHE.value = value;
   RUNTIME_SETTINGS_CACHE.expiresAt = now + 60_000;
   return value;
@@ -643,6 +1216,7 @@ async function banAndDelete(
   details: string,
   meta: LogMeta
 ): Promise<{ action: string; logId: number | null }> {
+  await cleanupJoinMessagesForUser(db, token, chatId, userId);
   const deleteResp = await telegramApi<boolean>(token, 'deleteMessage', { chat_id: chatId, message_id: messageId });
   const banResp = await telegramApi<boolean>(token, 'banChatMember', { chat_id: chatId, user_id: userId, revoke_messages: true });
 
@@ -753,7 +1327,7 @@ async function unbanFromLogById(
     .bind(id)
     .first<{ id: number; action: string; user_id: number | null; details: string | null; meta_json: string | null }>();
   if (!row) return { ok: false, error: 'not found' };
-  if (row.action !== 'ban_delete' && row.action !== 'ban_delete_partial') {
+  if (row.action !== 'ban_delete' && row.action !== 'ban_delete_partial' && row.action !== 'premod_failed') {
     return { ok: false, error: 'unban is only available for ban records' };
   }
 
@@ -816,16 +1390,70 @@ app.post('/webhook/:pathToken', async (c) => {
   const update = await c.req.json<{
     message?: TelegramMessage;
     my_chat_member?: TelegramChatMemberUpdate;
+    chat_member?: TelegramChatMemberUpdate;
     callback_query?: TelegramCallbackQuery;
   }>();
+  await processExpiredPremoderationChallenges(db, settings);
+  await cleanupPassedPremoderationMessages(db, settings);
   const callbackQuery = update.callback_query;
   if (callbackQuery?.id && callbackQuery.data) {
+    const data = callbackQuery.data;
+    if (data.startsWith('pm:')) {
+      const [, challengeToken, selectedRaw] = data.split(':');
+      const selectedDigit = Number(selectedRaw);
+      if (!challengeToken || !Number.isFinite(selectedDigit)) {
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Невірна відповідь');
+        return c.json({ ok: true, skipped: 'invalid_premod_callback' });
+      }
+
+      const row = await db
+        .prepare(
+          `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+           FROM premoderation_challenges
+           WHERE challenge_token = ?`
+        )
+        .bind(challengeToken)
+        .first<PremodChallengeRow>();
+      if (!row) {
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Ця перевірка вже неактуальна');
+        return c.json({ ok: true, skipped: 'premod_not_found' });
+      }
+      if (String(callbackQuery.from.id) !== String(row.user_id)) {
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Ця перевірка не для вас');
+        return c.json({ ok: true, skipped: 'premod_wrong_user' });
+      }
+      if (row.status !== 'pending') {
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Вже оброблено');
+        return c.json({ ok: true, skipped: 'premod_already_processed' });
+      }
+      if (row.expires_at <= new Date().toISOString()) {
+        await resolvePremoderationFailure(db, settings, row, 'expired_click', selectedDigit);
+        if (row.captcha_message_id) {
+          await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+        }
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Час вичерпано');
+        return c.json({ ok: true, action: 'premod_failed_expired' });
+      }
+
+      if (selectedDigit !== row.correct_digit) {
+        await resolvePremoderationFailure(db, settings, row, 'wrong_digit', selectedDigit);
+        if (row.captcha_message_id) {
+          await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Неправильна відповідь.', []);
+        }
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Неправильно');
+        return c.json({ ok: true, action: 'premod_failed_wrong' });
+      }
+
+      const passResult = await resolvePremoderationSuccess(db, settings, row);
+      await answerCallbackQuery(settings.token, callbackQuery.id, passResult.ok ? 'Перевірку пройдено' : passResult.error ?? 'failed');
+      return c.json({ ok: passResult.ok, action: 'premod_pass', error: passResult.error });
+    }
+
     if (!settings.adminUserId || String(callbackQuery.from.id) !== String(settings.adminUserId)) {
       await answerCallbackQuery(settings.token, callbackQuery.id, 'Only configured admin can use this action');
       return c.json({ ok: true, skipped: 'callback_not_admin' });
     }
 
-    const data = callbackQuery.data;
     if (data.startsWith('qr_ban:')) {
       const id = Number(data.slice('qr_ban:'.length));
       const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'invalid id' };
@@ -874,10 +1502,72 @@ app.post('/webhook/:pathToken', async (c) => {
     );
     return c.json({ ok: true, action: 'chat_membership_update', chatId: membershipUpdate.chat.id, status });
   }
+  const memberUpdate = update.chat_member;
+  if (memberUpdate?.chat?.id && String(memberUpdate.chat.id) === String(settings.chatId)) {
+    const oldStatus = memberUpdate.old_chat_member?.status ?? '';
+    const newStatus = memberUpdate.new_chat_member?.status ?? '';
+    const joined = (oldStatus === 'left' || oldStatus === 'kicked') && (newStatus === 'member' || newStatus === 'restricted');
+    const joinedUser = memberUpdate.new_chat_member?.user;
+    if (joined && joinedUser) {
+      const premodResult = await startPremoderationForUser(db, settings, c.executionCtx, joinedUser);
+      if (!premodResult.ok) {
+        await logAction(
+          db,
+          'premod_error',
+          joinedUser.id,
+          `failed to start pre-moderation for ${joinedUser.id}: ${premodResult.error ?? 'unknown error'}`,
+          {
+            user: {
+              id: joinedUser.id,
+              username: joinedUser.username,
+              firstName: joinedUser.first_name,
+              lastName: joinedUser.last_name
+            },
+            source: 'premoderation',
+            chatId: String(memberUpdate.chat.id)
+          }
+        );
+      }
+      return c.json({ ok: true, action: 'premod_join_chat_member', result: premodResult });
+    }
+  }
 
   const message = update.message;
   if (!message) return c.json({ ok: true, skipped: 'no_message' });
   if (String(message.chat.id) !== String(settings.chatId)) return c.json({ ok: true, skipped: 'wrong_chat' });
+
+  if (message.new_chat_members?.length) {
+    const results = [];
+    for (const member of message.new_chat_members) {
+      const result = await startPremoderationForUser(db, settings, c.executionCtx, member, message.message_id);
+      results.push({ userId: member.id, ...result });
+      if (!result.ok) {
+        await logAction(
+          db,
+          'premod_error',
+          member.id,
+          `failed to start pre-moderation for ${member.id}: ${result.error ?? 'unknown error'}`,
+          {
+            user: {
+              id: member.id,
+              username: member.username,
+              firstName: member.first_name,
+              lastName: member.last_name
+            },
+            source: 'premoderation',
+            chatId: String(message.chat.id),
+            messageId: message.message_id
+          }
+        );
+      }
+    }
+    return c.json({ ok: true, action: 'premod_join_message', results });
+  }
+
+  if (message.left_chat_member) {
+    await deleteMessage(settings.token, settings.chatId, message.message_id);
+    return c.json({ ok: true, action: 'cleanup_left_member_message' });
+  }
 
   const sender = message.from;
   const text = message.text ?? message.caption ?? '';
@@ -1093,6 +1783,13 @@ app.get('/admin/api/settings', async (c) => {
   const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
   const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
   const adminUserId = (await getSetting(db, 'ADMIN_USER_ID')) ?? '';
+  const premoderationEnabled = (await getSetting(db, 'PREMODERATION_ENABLED')) === '1';
+  const timeoutRaw = Number((await getSetting(db, 'PREMODERATION_TIMEOUT_SEC')) ?? '');
+  const premoderationTimeoutSec =
+    Number.isFinite(timeoutRaw) && timeoutRaw > 0
+      ? Math.max(10, Math.min(300, Math.floor(timeoutRaw)))
+      : DEFAULT_PREMODERATION_TIMEOUT_SEC;
+  const premoderationPrompt = (await getSetting(db, 'PREMODERATION_PROMPT')) || DEFAULT_PREMODERATION_PROMPT;
   return c.json({
     ok: true,
     data: {
@@ -1102,7 +1799,10 @@ app.get('/admin/api/settings', async (c) => {
       softKeywords,
       safeMode,
       webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : '',
-      adminUserId
+      adminUserId,
+      premoderationEnabled,
+      premoderationTimeoutSec,
+      premoderationPrompt
     }
   });
 });
@@ -1157,6 +1857,28 @@ app.post('/admin/api/settings/moderation', async (c) => {
     `updated moderation settings: soft keywords (${list.length}), safe mode ${body.safeMode ? 'on' : 'off'}`
   );
   return c.json({ ok: true, data: { keywords: list, safeMode: !!body.safeMode } });
+});
+
+app.post('/admin/api/settings/premoderation', async (c) => {
+  const body = await c.req.json<{ enabled?: boolean; timeoutSec?: number; prompt?: string }>();
+  const timeoutRaw = Number(body.timeoutSec ?? DEFAULT_PREMODERATION_TIMEOUT_SEC);
+  if (!Number.isFinite(timeoutRaw) || timeoutRaw < 10 || timeoutRaw > 300) {
+    return jsonError('timeoutSec must be in range 10..300');
+  }
+  const timeoutSec = Math.floor(timeoutRaw);
+  const prompt = String(body.prompt ?? '').trim() || DEFAULT_PREMODERATION_PROMPT;
+  if (prompt.length > 1000) return jsonError('prompt is too long');
+
+  await setSetting(c.env.DB, 'PREMODERATION_ENABLED', body.enabled ? '1' : '0');
+  await setSetting(c.env.DB, 'PREMODERATION_TIMEOUT_SEC', String(timeoutSec));
+  await setSetting(c.env.DB, 'PREMODERATION_PROMPT', prompt);
+  await logAction(
+    c.env.DB,
+    'premod_settings_updated',
+    null,
+    `pre-moderation ${body.enabled ? 'enabled' : 'disabled'}; timeout ${timeoutSec}s`
+  );
+  return c.json({ ok: true, data: { enabled: !!body.enabled, timeoutSec, prompt } });
 });
 
 app.get('/admin/api/blacklist', async (c) => {
@@ -1239,7 +1961,7 @@ app.get('/admin/api/logs', async (c) => {
 
   const filterSql = includeSystem
     ? ''
-    : `WHERE action NOT IN ('settings_updated', 'blacklist_add', 'blacklist_delete', 'soft_keywords_updated', 'log_deleted')`;
+    : `WHERE action NOT IN ('settings_updated', 'blacklist_add', 'blacklist_delete', 'soft_keywords_updated', 'premod_settings_updated', 'log_deleted')`;
 
   const [rows, totalRow] = await Promise.all([
     c.env.DB
@@ -1314,6 +2036,13 @@ const ADMIN_HTML = `<!doctype html>
             <button id="saveSettings" class="px-3 py-2 bg-blue-600 text-white rounded">Save & Set Webhook</button>
             <div id="webhookPathInfo" class="text-xs text-slate-600"></div>
             <label class="flex items-center gap-2 font-medium"><input id="safeMode" type="checkbox" />Safe Mode (no real ban/delete)</label>
+            <div class="pt-2 border-t space-y-2">
+              <label class="flex items-center gap-2 font-medium"><input id="premoderationEnabled" type="checkbox" />Pre-Moderation (captcha for new users)</label>
+              <input id="premoderationTimeoutSec" type="number" min="10" max="300" class="border rounded p-2 w-full md:w-64" placeholder="Timeout seconds (10-300)" />
+              <label for="premoderationPrompt" class="block font-medium">Pre-Moderation Prompt (Ukrainian, supports {user}, {digit}, {seconds})</label>
+              <textarea id="premoderationPrompt" rows="3" class="w-full border rounded p-2" placeholder="Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек."></textarea>
+              <button id="savePremoderation" class="px-3 py-2 bg-teal-700 text-white rounded">Save Pre-Moderation</button>
+            </div>
             <label for="softKeywords" class="block font-medium">Soft Keywords (one phrase per line)</label>
             <textarea
               id="softKeywords"
@@ -1445,6 +2174,9 @@ const ADMIN_HTML = `<!doctype html>
         $('adminUserId').value = data.data.adminUserId || '';
         $('softKeywords').value = (data.data.softKeywords || []).join('\\n');
         $('safeMode').checked = !!data.data.safeMode;
+        $('premoderationEnabled').checked = !!data.data.premoderationEnabled;
+        $('premoderationTimeoutSec').value = String(data.data.premoderationTimeoutSec || 30);
+        $('premoderationPrompt').value = data.data.premoderationPrompt || '';
         $('safeModeBadge').classList.toggle('hidden', !data.data.safeMode);
         $('webhookPathInfo').textContent = data.data.webhookPath
           ? 'Private webhook path: ' + data.data.webhookPath
@@ -1474,6 +2206,17 @@ const ADMIN_HTML = `<!doctype html>
           })
         });
         $('safeModeBadge').classList.toggle('hidden', !$('safeMode').checked);
+      }
+
+      async function savePremoderation() {
+        await api('/admin/api/settings/premoderation', {
+          method: 'POST',
+          body: JSON.stringify({
+            enabled: $('premoderationEnabled').checked,
+            timeoutSec: Number($('premoderationTimeoutSec').value || '30'),
+            prompt: $('premoderationPrompt').value
+          })
+        });
       }
 
       async function loadBlacklist() {
@@ -1589,6 +2332,11 @@ const ADMIN_HTML = `<!doctype html>
         if (action === 'ban_delete_partial') return 'Ban/Delete Partial Failure';
         if (action === 'quarantine') return 'Quarantine';
         if (action === 'quarantine_report') return 'Spam Report';
+        if (action === 'premod_started') return 'Pre-Moderation Started';
+        if (action === 'premod_passed') return 'Pre-Moderation Passed';
+        if (action === 'premod_failed') return 'Pre-Moderation Failed';
+        if (action === 'premod_error') return 'Pre-Moderation Error';
+        if (action === 'premod_settings_updated') return 'Pre-Moderation Settings Updated';
         if (action === 'unban') return 'Unban';
         return action;
       }
@@ -1644,7 +2392,9 @@ const ADMIN_HTML = `<!doctype html>
               '</div>'
             : '';
 
-          const canUnban = (row.action === 'ban_delete' || row.action === 'ban_delete_partial') && !meta?.unbannedAt;
+          const canUnban =
+            (row.action === 'ban_delete' || row.action === 'ban_delete_partial' || row.action === 'premod_failed') &&
+            !meta?.unbannedAt;
 
           const el = rowCard(
             '<div class="space-y-2">' +
@@ -1703,6 +2453,11 @@ const ADMIN_HTML = `<!doctype html>
       $('saveModeration').addEventListener('click', () =>
         saveModeration()
           .then(() => alert('Moderation settings saved'))
+          .catch((e) => alert(e.message))
+      );
+      $('savePremoderation').addEventListener('click', () =>
+        savePremoderation()
+          .then(() => alert('Pre-moderation settings saved'))
           .catch((e) => alert(e.message))
       );
       $('addPattern').addEventListener('click', () => addPattern().catch((e) => alert(e.message)));
