@@ -1883,44 +1883,27 @@ app.post('/admin/api/settings/premoderation', async (c) => {
   return c.json({ ok: true, data: { enabled: !!body.enabled, timeoutSec, prompt } });
 });
 
-app.get('/admin/api/blacklist', async (c) => {
-  const { page, pageSize, offset } = parsePagination(c.req.raw, 20, 100);
-  const [rows, totalRow] = await Promise.all([
-    c.env.DB
-      .prepare('SELECT id, pattern, is_regex FROM blacklist ORDER BY id DESC LIMIT ? OFFSET ?')
-      .bind(pageSize, offset)
-      .all<{ id: number; pattern: string; is_regex: number }>(),
-    c.env.DB.prepare('SELECT COUNT(*) AS total FROM blacklist').first<{ total: number }>()
-  ]);
-  return c.json({ ok: true, data: rows.results ?? [], paging: pagingMeta(totalRow?.total ?? 0, page, pageSize) });
+app.get('/admin/api/blacklist/sync', async (c) => {
+  const rows = await c.env.DB
+    .prepare('SELECT pattern FROM blacklist ORDER BY id ASC')
+    .all<{ pattern: string }>();
+  return c.json({ ok: true, data: (rows.results ?? []).map(r => r.pattern) });
 });
 
-app.post('/admin/api/blacklist', async (c) => {
-  const body = await c.req.json<{ pattern?: string; isRegex?: boolean }>();
-  const pattern = (body.pattern ?? '').trim();
-  const isRegex = !!body.isRegex;
-  if (!pattern) return jsonError('pattern is required');
-
-  if (isRegex) {
-    try {
-      new RegExp(pattern, 'u');
-    } catch {
-      return jsonError('invalid regex');
+app.post('/admin/api/blacklist/sync', async (c) => {
+  const body = await c.req.json<{ patterns?: string[] }>();
+  const patterns = body.patterns || [];
+  
+  const batch = [];
+  batch.push(c.env.DB.prepare('DELETE FROM blacklist'));
+  for (const p of patterns) {
+    if (p.trim()) {
+      batch.push(c.env.DB.prepare('INSERT INTO blacklist (pattern, is_regex) VALUES (?, 0)').bind(p.trim()));
     }
   }
-
-  await c.env.DB.prepare('INSERT INTO blacklist(pattern, is_regex) VALUES(?, ?)').bind(pattern, isRegex ? 1 : 0).run();
+  await c.env.DB.batch(batch);
   BLACKLIST_CACHE.delete('global');
-  await logAction(c.env.DB, 'blacklist_add', null, `added pattern "${pattern}"`);
-  return c.json({ ok: true });
-});
-
-app.delete('/admin/api/blacklist/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) return jsonError('invalid id');
-  await c.env.DB.prepare('DELETE FROM blacklist WHERE id = ?').bind(id).run();
-  BLACKLIST_CACHE.delete('global');
-  await logAction(c.env.DB, 'blacklist_delete', null, `deleted pattern id ${id}`);
+  await logAction(c.env.DB, 'blacklist_add', null, `synced ${patterns.length} patterns`);
   return c.json({ ok: true });
 });
 
