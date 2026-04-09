@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+      html { font-size: 13px; }
+      @media (min-width: 768px) { html { font-size: 16px; } }
       body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 0; }
       .glass-panel { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
       .card-row { background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); }
@@ -45,7 +47,7 @@
       <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-900/20 blur-[120px]"></div>
     </div>
 
-    <main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6 relative z-10 w-full flex-1 flex flex-col h-screen">
+    <main class="max-w-7xl mx-auto p-2 sm:p-4 md:p-6 space-y-4 sm:space-y-6 relative z-10 w-full flex-1 flex flex-col h-[100dvh] lg:h-screen lg:overflow-hidden">
       <!-- Header -->
       <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel rounded-2xl p-4 md:px-6 flex-shrink-0">
         <div class="flex items-center gap-3">
@@ -68,34 +70,34 @@
       </header>
 
       <!-- Main Workspace -->
-      <div class="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 overflow-hidden">
+      <div class="flex flex-col lg:flex-row gap-4 sm:gap-6 flex-1 min-h-0 overflow-hidden pb-2 lg:pb-0">
         
         <!-- Sidebar Navigation -->
-        <nav class="glass-panel w-full lg:w-64 flex-shrink-0 rounded-2xl p-3 flex flex-col gap-1 lg:overflow-y-auto">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Dashboard</div>
+        <nav class="glass-panel w-full lg:w-64 flex-shrink-0 rounded-2xl p-2 sm:p-3 flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto overflow-y-hidden" style="scrollbar-width: none;">
+          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Dashboard</div>
           
-          <button class="nav-tab active" data-target="queue">
-            <svg viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-            Review Queue
-            <span id="badge-queue" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)]"></span>
+          <button class="nav-tab active flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="queue">
+            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span class="truncate w-full lg:w-auto">Review Queue</span>
+            <span id="badge-queue" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)]"></span>
           </button>
           
-          <button class="nav-tab" data-target="history">
-            <svg viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            Action History
-            <span id="badge-history" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)]"></span>
+          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left relative" data-target="history">
+            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span class="truncate w-full lg:w-auto">History</span>
+            <span id="badge-history" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)]"></span>
           </button>
           
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Configuration</div>
+          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Configuration</div>
           
-          <button class="nav-tab" data-target="blacklist">
-             <svg viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-             Blacklist & Words
+          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="blacklist">
+             <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+             <span class="truncate w-full lg:w-auto">Filters</span>
           </button>
 
-          <button class="nav-tab" data-target="settings">
-            <svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            System Setup
+          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="settings">
+            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            <span class="truncate w-full lg:w-auto">Settings</span>
           </button>
         </nav>
 
@@ -103,7 +105,7 @@
         <div class="glass-panel flex-1 rounded-2xl flex flex-col overflow-hidden relative">
           
           <!-- TAB: Review Queue -->
-          <section id="tab-queue" class="tab-section active p-6">
+          <section id="tab-queue" class="tab-section active p-3 sm:p-5 lg:p-6">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
               <span class="text-amber-400">Review Queue</span>
             </h2>
@@ -112,7 +114,7 @@
           </section>
 
           <!-- TAB: Action History -->
-          <section id="tab-history" class="tab-section p-6">
+          <section id="tab-history" class="tab-section p-3 sm:p-5 lg:p-6">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 flex-shrink-0">
               <h2 class="text-xl font-semibold flex items-center gap-2">
                 <span class="text-blue-400">Action History</span>
@@ -127,7 +129,7 @@
           </section>
 
           <!-- TAB: Blacklist & Moderation -->
-          <section id="tab-blacklist" class="tab-section p-6 overflow-y-auto">
+          <section id="tab-blacklist" class="tab-section p-3 sm:p-5 lg:p-6 overflow-y-auto">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
               <span class="text-emerald-400">Filters & Moderation</span>
             </h2>
@@ -181,7 +183,7 @@
           </section>
 
           <!-- TAB: System Settings -->
-          <section id="tab-settings" class="tab-section p-6 overflow-y-auto">
+          <section id="tab-settings" class="tab-section p-3 sm:p-5 lg:p-6 overflow-y-auto">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
               <span class="text-indigo-400">System Setup</span>
             </h2>
@@ -257,6 +259,28 @@
         topQueueId: 0,
         topHistoryId: 0
       };
+      const memSeen = { queue: 0, history: 0 };
+
+      function readSeen(key) {
+        try {
+          const raw = localStorage.getItem(key);
+          const parsed = Number.parseInt(raw || '0', 10);
+          return Number.isFinite(parsed) ? parsed : 0;
+        } catch {
+          return key === 'lastSeenQueueId' ? memSeen.queue : memSeen.history;
+        }
+      }
+
+      function writeSeen(key, value) {
+        const safe = Number.isFinite(Number(value)) ? Number(value) : 0;
+        if (key === 'lastSeenQueueId') memSeen.queue = safe;
+        if (key === 'lastSeenHistoryId') memSeen.history = safe;
+        try {
+          localStorage.setItem(key, String(safe));
+        } catch {
+          // Ignore storage failures.
+        }
+      }
 
       // --- Tab Navigation Logic ---
       document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -269,15 +293,16 @@
           const target = e.currentTarget;
           target.classList.add('active');
           const targetId = 'tab-' + target.dataset.target;
-          $(targetId).classList.add('active');
+          const section = $(targetId);
+          if (section) section.classList.add('active');
           
           // Clear badges and track seen
           if (target.dataset.target === 'queue') {
             $('badge-queue').classList.add('hidden');
-            if (state.topQueueId) localStorage.setItem('lastSeenQueueId', state.topQueueId);
+            if (state.topQueueId) writeSeen('lastSeenQueueId', state.topQueueId);
           } else if (target.dataset.target === 'history') {
             $('badge-history').classList.add('hidden');
-            if (state.topHistoryId) localStorage.setItem('lastSeenHistoryId', state.topHistoryId);
+            if (state.topHistoryId) writeSeen('lastSeenHistoryId', state.topHistoryId);
           }
         });
       });
@@ -326,6 +351,7 @@
 
       function pager(rootId, paging, onPageChange) {
         const root = $(rootId);
+        if (!root) return;
         if (!paging) { root.innerHTML = ''; return; }
         const prevDisabled = paging.page <= 1;
         const nextDisabled = paging.page >= paging.totalPages;
@@ -425,9 +451,10 @@
         
         if (data.data.length > 0) {
           state.topQueueId = Math.max(...data.data.map(r => r.id));
-          const tempLastSeen = parseInt(localStorage.getItem('lastSeenQueueId') || '0', 10);
-          if (document.querySelector('[data-target="queue"]').classList.contains('active')) {
-            localStorage.setItem('lastSeenQueueId', state.topQueueId);
+          const tempLastSeen = readSeen('lastSeenQueueId');
+          const queueTab = document.querySelector('[data-target="queue"]');
+          if (queueTab && queueTab.classList.contains('active')) {
+            writeSeen('lastSeenQueueId', state.topQueueId);
             $('badge-queue').classList.add('hidden');
           } else if (state.topQueueId > tempLastSeen) {
             const unseenCount = data.data.filter(r => r.id > tempLastSeen).length;
@@ -503,6 +530,7 @@
       }
 
       function actionColor(action) {
+        action = String(action || '');
         if (action.includes('error') || action.includes('failed') || action === 'ban_delete' || action === 'ban_delete_partial') return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
         if (action.includes('passed') || action === 'unban' || action === 'quarantine_approved') return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
         if (action.includes('quarantine')) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
@@ -517,9 +545,10 @@
         
         if (data.data.length > 0) {
           state.topHistoryId = Math.max(...data.data.map(r => r.id));
-          const tempLastSeen = parseInt(localStorage.getItem('lastSeenHistoryId') || '0', 10);
-          if (document.querySelector('[data-target="history"]').classList.contains('active')) {
-            localStorage.setItem('lastSeenHistoryId', state.topHistoryId);
+          const tempLastSeen = readSeen('lastSeenHistoryId');
+          const historyTab = document.querySelector('[data-target="history"]');
+          if (historyTab && historyTab.classList.contains('active')) {
+            writeSeen('lastSeenHistoryId', state.topHistoryId);
             $('badge-history').classList.add('hidden');
           } else if (state.topHistoryId > tempLastSeen) {
             const unseenCount = data.data.filter(r => r.id > tempLastSeen).length;
@@ -590,16 +619,18 @@
 
       // Minor helper wrapper for updating history when creating rules
       function refreshHistory() {
-         if ($('includeSystemLogs').checked) {
-             state.logsPage = 1;
-             loadLogs().catch(() => {});
-         }
+        state.logsPage = 1;
+        loadLogs().catch(() => {});
       }
 
       async function refreshAll() {
         $('refreshBtn').classList.add('opacity-50', 'cursor-wait');
         try {
-          await Promise.all([loadSettings(), loadBlacklist(), loadQuarantine(), loadLogs()]);
+          const results = await Promise.allSettled([loadSettings(), loadBlacklist(), loadQuarantine(), loadLogs()]);
+          const firstFailed = results.find((item) => item.status === 'rejected');
+          if (firstFailed && firstFailed.status === 'rejected') {
+            throw firstFailed.reason;
+          }
         } finally {
           setTimeout(() => $('refreshBtn').classList.remove('opacity-50', 'cursor-wait'), 300);
         }
