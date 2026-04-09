@@ -34,6 +34,12 @@
       .nav-tab.active { background: rgba(99, 102, 241, 0.15); color: #818cf8; border-color: rgba(99, 102, 241, 0.3); }
       .nav-tab svg { width: 1.25rem; height: 1.25rem; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
       
+      /* Toasts */
+      .toast { animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      .toast.closing { animation: toastOut 0.3s ease-in forwards; }
+      @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
+      
       .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; }
       .tab-section.active { display: flex; }
       
@@ -238,6 +244,9 @@
       </div>
     </main>
 
+    <!-- Toasts -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
     <script>
       const $ = (id) => document.getElementById(id);
       const state = {
@@ -302,6 +311,25 @@
           .replaceAll('>', '&gt;')
           .replaceAll('"', '&quot;')
           .replaceAll("'", '&#39;');
+      }
+
+      function showToast(msg, type = 'success') {
+        const container = $('toastContainer');
+        const toast = document.createElement('div');
+        const iconInfo = type === 'error' 
+           ? '<svg class="w-5 h-5 text-rose-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>' 
+           : '<svg class="w-5 h-5 text-emerald-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>';
+        
+        const bgColor = type === 'error' ? 'bg-rose-900/60 border-rose-500/40 text-rose-100' : 'bg-emerald-900/60 border-emerald-500/40 text-emerald-100';
+        
+        toast.className = 'toast flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-xl font-medium text-sm border-t border-t-white/10 ' + bgColor;
+        toast.innerHTML = iconInfo + '<span>' + esc(msg) + '</span>';
+        
+        container.appendChild(toast);
+        setTimeout(() => {
+          toast.classList.add('closing');
+          setTimeout(() => toast.remove(), 300);
+        }, 3000);
       }
 
       async function api(path, options = {}) {
@@ -485,7 +513,7 @@
 
         pager('quarantinePager', data.paging, (page) => {
           state.quarantinePage = page;
-          loadQuarantine().catch(e => alert(e.message));
+          loadQuarantine().catch(e => showToast(e.message, 'error'));
         });
       }
 
@@ -579,7 +607,7 @@
           });
         });
 
-        pager('logsPager', data.paging, (page) => { state.logsPage = page; loadLogs().catch(e => alert(e.message)); });
+        pager('logsPager', data.paging, (page) => { state.logsPage = page; loadLogs().catch(e => showToast(e.message, 'error')); });
       }
 
       // Minor helper wrapper for updating history when creating rules
@@ -601,16 +629,16 @@
         }
       }
 
-      $('saveSettings').addEventListener('click', () => saveSettings().then(() => alert('Saved')).catch(e => alert(e.message)));
-      $('saveModeration').addEventListener('click', () => saveModeration().then(() => alert('Moderation settings saved')).catch(e => alert(e.message)));
-      $('savePremoderation').addEventListener('click', () => savePremoderation().then(() => alert('Pre-moderation settings saved')).catch(e => alert(e.message)));
-      $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => alert('Blacklist saved')).catch(e => alert(e.message)));
+      $('saveSettings').addEventListener('click', () => saveSettings().then(() => showToast('Saved')).catch(e => showToast(e.message, 'error')));
+      $('saveModeration').addEventListener('click', () => saveModeration().then(() => showToast('Moderation settings saved')).catch(e => showToast(e.message, 'error')));
+      $('savePremoderation').addEventListener('click', () => savePremoderation().then(() => showToast('Pre-moderation settings saved')).catch(e => showToast(e.message, 'error')));
+      $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => showToast('Blacklist saved')).catch(e => showToast(e.message, 'error')));
 
-      $('refreshBtn').addEventListener('click', () => refreshAll().catch(e => alert(e.message)));
+      $('refreshBtn').addEventListener('click', () => refreshAll().catch(e => showToast(e.message, 'error')));
       $('logoutBtn').addEventListener('click', () => { window.location.href = '/cdn-cgi/access/logout'; });
-      $('includeSystemLogs').addEventListener('change', () => { state.logsPage = 1; loadLogs().catch(e => alert(e.message)); });
+      $('includeSystemLogs').addEventListener('change', () => { state.logsPage = 1; loadLogs().catch(e => showToast(e.message, 'error')); });
 
-      refreshAll().catch(e => alert(e.message));
+      refreshAll().catch(e => showToast(e.message, 'error'));
     </script>
   </body>
 </html>
