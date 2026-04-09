@@ -112,6 +112,7 @@ const DEFAULT_SOFT_SUSPICIOUS_KEYWORDS = [
   'быстрые деньги'
 ];
 const DEFAULT_PREMODERATION_TIMEOUT_SEC = 30;
+const PREMODERATION_TIMEOUT_MARGIN_SEC = 3;
 const DEFAULT_PREMODERATION_PROMPT =
   'Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек.';
 const UA_NUMBER_WORDS: Record<number, string> = {
@@ -1005,7 +1006,8 @@ function schedulePremoderationTimeout(
 ): void {
   executionCtx.waitUntil(
     (async () => {
-      await sleep(Math.max(1, timeoutSec) * 1000);
+      const sleepSec = Math.max(1, timeoutSec - PREMODERATION_TIMEOUT_MARGIN_SEC);
+      await sleep(sleepSec * 1000);
       const settings = await getRuntimeSettings(db);
       if (!settings || settings.chatId !== chatId) return;
       const row = await db
@@ -1017,7 +1019,13 @@ function schedulePremoderationTimeout(
         .bind(challengeToken)
         .first<PremodChallengeRow>();
       if (!row || row.status !== 'pending') return;
-      if (row.expires_at > new Date().toISOString()) return;
+      const expiresAtMs = Date.parse(row.expires_at);
+      if (
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs - Date.now() > PREMODERATION_TIMEOUT_MARGIN_SEC * 1000
+      ) {
+        return;
+      }
       await resolvePremoderationFailure(db, settings, row, 'timeout');
       if (row.captcha_message_id) {
         await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
