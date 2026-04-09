@@ -357,7 +357,7 @@
       function highlightText(text, terms) {
         let highlighted = esc(text);
         if (!terms || !terms.length) return highlighted;
-        const cleanedTerms = terms.filter(t => t && t !== '[link]').map(t => esc(t)).sort((a,b) => b.length - a.length);
+        const cleanedTerms = terms.filter(t => t).map(t => esc(t)).sort((a,b) => b.length - a.length);
         if (!cleanedTerms.length) return highlighted;
         for (const term of cleanedTerms) {
           highlighted = highlighted.split(term).join('<mark class="bg-amber-400/20 text-amber-300 px-1 rounded font-medium">' + term + '</mark>');

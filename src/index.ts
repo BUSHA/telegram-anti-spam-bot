@@ -61,7 +61,6 @@ type LogMeta = {
   source?: string;
   messageId?: number;
   chatId?: string;
-  softLinkMatch?: boolean;
   unbannedAt?: string;
   unbannedBy?: string;
   reporter?: {
@@ -179,8 +178,7 @@ const HOMOGLYPHS: Record<string, string> = {
 const INVISIBLE_RE =
   /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFE00-\uFE0F\uFEFF]/gu;
 const NON_WORD_RE = /[^\p{L}\p{N}]+/gu;
-const LINK_RE = /(https?:\/\/|t\.me\/|telegram\.me\/)/u;
-const SYSTEM_CLEANUP_RE = /(deleted message|удалил\S* сообщение)/iu;
+const SYSTEM_CLEANUP_RE = /(deleted message|видалив повідомлення)/iu;
 
 function normalizeText(input: string): string {
   const lowered = input.toLowerCase().replace(INVISIBLE_RE, '');
@@ -736,9 +734,8 @@ function findSoftMatches(
   normalizedText: string,
   phraseText: string,
   keywords: string[]
-): { terms: string[]; softLinkMatch: boolean } {
+): { terms: string[] } {
   const terms = new Set<string>();
-  const linkMatch = LINK_RE.test(rawText.toLowerCase());
 
   for (const keyword of keywords) {
     const normalizedKeyword = normalizeForPhraseMatch(keyword);
@@ -752,8 +749,7 @@ function findSoftMatches(
   }
 
   return {
-    terms: Array.from(terms),
-    softLinkMatch: linkMatch
+    terms: Array.from(terms)
   };
 }
 
@@ -1737,13 +1733,13 @@ app.post('/webhook/:pathToken', async (c) => {
   }
 
   const softMatch = findSoftMatches(text, normalized, phraseText, settings.softKeywords);
-  if (softMatch.terms.length === 0 && !softMatch.softLinkMatch) {
+  if (softMatch.terms.length === 0) {
     return c.json({ ok: true, action: 'allow' });
   }
 
   if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
 
-  const softTerms = softMatch.softLinkMatch ? [...softMatch.terms, '[link]'] : softMatch.terms;
+  const softTerms = softMatch.terms;
   await db
     .prepare(
       'INSERT INTO quarantine(message_id, user_id, username, first_name, last_name, text) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
@@ -1759,7 +1755,7 @@ app.post('/webhook/:pathToken', async (c) => {
     'quarantine',
     sender.id,
     `soft match by ${userLabel} ${usernamePart}; matched: ${softTerms.join(', ') || 'none'}; text: ${text}`,
-    { ...metaBase, matchedTerms: softTerms, softLinkMatch: softMatch.softLinkMatch, source: 'soft_match' }
+    { ...metaBase, matchedTerms: softTerms, source: 'soft_match' }
   );
   if (settings.adminUserId && quarantineRow?.id) {
     await sendAdminMessage(
