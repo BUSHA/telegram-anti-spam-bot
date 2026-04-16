@@ -3,6 +3,7 @@ import ADMIN_HTML from './dashboard.html';
 
 type Env = {
   DB: D1Database;
+  DELAY_QUEUE: Queue<{ chatId: string; challengeToken: string }>;
 };
 
 type TelegramResponse<T> = {
@@ -110,7 +111,7 @@ const DEFAULT_SOFT_SUSPICIOUS_KEYWORDS = [
   'казин',
   'быстрые деньги'
 ];
-const DEFAULT_PREMODERATION_TIMEOUT_SEC = 30;
+const DEFAULT_PREMODERATION_TIMEOUT_SEC = 60;
 const PREMODERATION_TIMEOUT_MARGIN_SEC = 3;
 const DEFAULT_PREMODERATION_PROMPT =
   'Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек.';
@@ -989,51 +990,27 @@ async function cleanupJoinMessagesForUser(
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function schedulePremoderationTimeout(
-  executionCtx: { waitUntil(promise: Promise<unknown>): void },
-  db: D1Database,
+  env: Env,
+  ctx: any,
   chatId: string,
   challengeToken: string,
   timeoutSec: number
 ): void {
-  executionCtx.waitUntil(
-    (async () => {
-      const sleepSec = Math.max(1, timeoutSec - PREMODERATION_TIMEOUT_MARGIN_SEC);
-      await sleep(sleepSec * 1000);
-      const settings = await getRuntimeSettings(db);
-      if (!settings || settings.chatId !== chatId) return;
-      const row = await db
-        .prepare(
-          `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
-           FROM premoderation_challenges
-           WHERE challenge_token = ?`
-        )
-        .bind(challengeToken)
-        .first<PremodChallengeRow>();
-      if (!row || row.status !== 'pending') return;
-      const expiresAtMs = Date.parse(row.expires_at);
-      if (
-        Number.isFinite(expiresAtMs) &&
-        expiresAtMs - Date.now() > PREMODERATION_TIMEOUT_MARGIN_SEC * 1000
-      ) {
-        return;
-      }
-      await resolvePremoderationFailure(db, settings, row, 'timeout');
-      if (row.captcha_message_id) {
-        await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
-      }
-    })()
+  const sleepSec = Math.max(1, timeoutSec - PREMODERATION_TIMEOUT_MARGIN_SEC);
+  ctx.waitUntil(
+    env.DELAY_QUEUE.send(
+      { chatId, challengeToken },
+      { delaySeconds: sleepSec }
+    ).catch(console.error)
   );
 }
 
 async function startPremoderationForUser(
+  env: Env,
+  ctx: any,
   db: D1Database,
   settings: RuntimeSettings,
-  executionCtx: { waitUntil(promise: Promise<unknown>): void },
   user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
   joinMessageId?: number
 ): Promise<{ ok: boolean; skipped?: string; error?: string }> {
@@ -1068,11 +1045,16 @@ async function startPremoderationForUser(
   const timeoutSec = Math.max(10, Math.min(300, Math.floor(settings.premoderationTimeoutSec || DEFAULT_PREMODERATION_TIMEOUT_SEC)));
   const expiresAt = new Date(Date.now() + timeoutSec * 1000).toISOString();
 
-  await db
+  const insertRes = await db
     .prepare(
       `INSERT INTO premoderation_challenges(
         chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, expires_at
-      ) VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?, 'pending', ?)`
+      ) 
+      SELECT ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'pending', ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM premoderation_challenges
+        WHERE chat_id = ? AND user_id = ? AND status = 'pending'
+      )`
     )
     .bind(
       settings.chatId,
@@ -1083,9 +1065,15 @@ async function startPremoderationForUser(
       joinMessageId ?? null,
       challengeToken,
       correctDigit,
-      expiresAt
+      expiresAt,
+      settings.chatId,
+      user.id
     )
     .run();
+
+  if (insertRes.meta?.changes === 0) {
+    return { ok: true, skipped: 'already_pending_race' };
+  }
 
   const row = await db
     .prepare(
@@ -1142,7 +1130,7 @@ async function startPremoderationForUser(
       messageId: sendRes.result.message_id
     }
   );
-  schedulePremoderationTimeout(executionCtx, db, settings.chatId, challengeToken, timeoutSec);
+  schedulePremoderationTimeout(env, ctx, settings.chatId, challengeToken, timeoutSec);
   return { ok: true };
 }
 
@@ -1399,7 +1387,8 @@ app.post('/webhook/:pathToken', async (c) => {
     chat_member?: TelegramChatMemberUpdate;
     callback_query?: TelegramCallbackQuery;
   }>();
-  await processExpiredPremoderationChallenges(db, settings);
+  // Queues now handle timeouts authoritatively via schedulePremoderationTimeout
+  // await processExpiredPremoderationChallenges(db, settings);
   const callbackQuery = update.callback_query;
   if (callbackQuery?.id && callbackQuery.data) {
     const data = callbackQuery.data;
@@ -1514,7 +1503,7 @@ app.post('/webhook/:pathToken', async (c) => {
     const joined = (oldStatus === 'left' || oldStatus === 'kicked') && (newStatus === 'member' || newStatus === 'restricted');
     const joinedUser = memberUpdate.new_chat_member?.user;
     if (joined && joinedUser) {
-      const premodResult = await startPremoderationForUser(db, settings, c.executionCtx, joinedUser);
+      const premodResult = await startPremoderationForUser(c.env, c.executionCtx, db, settings, joinedUser);
       if (!premodResult.ok) {
         await logAction(
           db,
@@ -1545,7 +1534,7 @@ app.post('/webhook/:pathToken', async (c) => {
     await deleteMessage(settings.token, settings.chatId, message.message_id);
     const results = [];
     for (const member of message.new_chat_members) {
-      const result = await startPremoderationForUser(db, settings, c.executionCtx, member, message.message_id);
+      const result = await startPremoderationForUser(c.env, c.executionCtx, db, settings, member, message.message_id);
       results.push({ userId: member.id, ...result });
       if (!result.ok) {
         await logAction(
@@ -1996,4 +1985,34 @@ app.get('/admin', async (c) => {
   return c.html(ADMIN_HTML);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async queue(batch: any, env: Env) {
+    const db = env.DB;
+    for (const msg of batch.messages) {
+      const { chatId, challengeToken } = msg.body as { chatId: string, challengeToken: string };
+      const settings = await getRuntimeSettings(db);
+      if (!settings || settings.chatId !== chatId) continue;
+      const row = await db
+        .prepare(
+          `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
+           FROM premoderation_challenges
+           WHERE challenge_token = ?`
+        )
+        .bind(challengeToken)
+        .first<PremodChallengeRow>();
+      if (!row || row.status !== 'pending') continue;
+      const expiresAtMs = Date.parse(row.expires_at);
+      if (
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs - Date.now() > PREMODERATION_TIMEOUT_MARGIN_SEC * 1000
+      ) {
+        continue;
+      }
+      await resolvePremoderationFailure(db, settings, row, 'timeout');
+      if (row.captcha_message_id) {
+        await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+      }
+    }
+  }
+};

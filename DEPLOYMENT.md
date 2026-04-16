@@ -72,7 +72,15 @@ curl -X POST "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/d1/data
   --data-binary @<(jq -n --arg sql "$(cat schema.sql)" '{sql: [$sql]}')
 ```
 
-## 6. Deploy Worker
+## 6. Create Delay Queue
+
+Create the queue required for pre-moderation processing:
+
+```bash
+npx wrangler queues create anti-spam-delay-queue
+```
+
+## 7. Deploy Worker
 
 Deploy:
 
@@ -86,9 +94,9 @@ After deploy, note your Worker URL, for example:
 
 The bot uses this URL for Telegram webhook setup.
 
-## 7. Telegram Bot and Group Setup
+## 8. Telegram Bot and Group Setup
 
-## 7.1 Create bot token
+## 8.1 Create bot token
 
 In Telegram, message `@BotFather`:
 
@@ -96,14 +104,14 @@ In Telegram, message `@BotFather`:
 2. Set name and username
 3. Copy token (format similar to `123456:ABC...`)
 
-## 7.2 Add bot to your group
+## 8.2 Add bot to your group
 
 Add the bot to the target group and grant admin rights:
 
 - Delete messages
 - Ban users
 
-## 7.3 Get target chat ID
+## 8.3 Get target chat ID
 
 Use one of:
 
@@ -112,7 +120,7 @@ Use one of:
 
 For supergroups, chat IDs usually look like `-1001234567890`.
 
-## 8. System Setup in Dashboard
+## 9. System Setup in Dashboard
 
 Open:
 
@@ -133,7 +141,7 @@ This does:
    - `https://<worker-domain>/webhook`
    - with secret token validation enabled
 
-## 9. Protect `/admin` with Cloudflare Zero Trust
+## 10. Protect `/admin` with Cloudflare Zero Trust
 
 This project intentionally has no internal login. Protect `/admin/*` using Cloudflare Access.
 
@@ -151,9 +159,9 @@ Recommended:
 - Keep `/webhook` public
 - Protect only `/admin` and `/admin/api/*`
 
-## 10. Validate Deployment
+## 11. Validate Deployment
 
-## 10.1 Health check
+## 11.1 Health check
 
 ```bash
 curl https://<your-worker-domain>/health
@@ -165,7 +173,7 @@ Expected:
 {"ok":true}
 ```
 
-## 10.2 Verify webhook
+## 11.2 Verify webhook
 
 ```bash
 curl "https://api.telegram.org/bot<YOUR_TOKEN>/getWebhookInfo"
@@ -176,13 +184,13 @@ Check:
 - `url` is `https://<your-worker-domain>/webhook`
 - no recent webhook errors
 
-## 10.3 Functional test
+## 11.3 Functional test
 
 1. Add a clear test word to blacklist in `/admin`
 2. Send that word from a non-admin user in the target group
 3. Expected: message deleted + user banned + log entry appears in History
 
-## 11. Runtime Behavior Summary
+## 12. Runtime Behavior Summary
 
 - Admin users are ignored (fetched via `getChatAdministrators`, cached)
 - Text normalization before checks:
@@ -197,7 +205,7 @@ Check:
   - insert into quarantine
   - review manually from dashboard
 
-## 12. Day-2 Operations
+## 13. Day-2 Operations
 
 Regenerate runtime types after any `wrangler.toml` binding/config change:
 
@@ -217,7 +225,7 @@ Optional: view D1 data:
 npx wrangler d1 execute telegram_antispam --remote --command "SELECT * FROM logs ORDER BY id DESC LIMIT 20;"
 ```
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 - `Cannot find name 'D1Database'`:
   - Run `npm run types`
@@ -235,7 +243,7 @@ npx wrangler d1 execute telegram_antispam --remote --command "SELECT * FROM logs
 - `/admin` open to internet:
   - Verify Access app path policy is exactly `/admin/*`
 
-## 14. Security Notes
+## 15. Security Notes
 
 - Do not hardcode bot token in source code
 - Rotate bot token if leaked, then re-save settings in dashboard

@@ -10,3 +10,13 @@ rules = [
 binding = "DB"
 database_name = "telegram_antispam"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[[queues.producers]]
+binding = "DELAY_QUEUE"
+queue = "anti-spam-delay-queue"
+
+[[queues.consumers]]
+queue = "anti-spam-delay-queue"
+max_batch_size = 10
+max_batch_timeout = 0
+max_retries = 0
