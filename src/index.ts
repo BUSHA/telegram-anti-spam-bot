@@ -99,22 +99,20 @@ const BLACKLIST_CACHE = new Map<
 >();
 
 const DEFAULT_SOFT_SUSPICIOUS_KEYWORDS = [
-  'заработ',
-  'доход',
-  'инвест',
-  'крипт',
-  'прибыл',
-  'без влож',
-  'в личку',
-  'пиши в лс',
-  'ставк',
-  'казин',
-  'быстрые деньги'
+  'Навчання оплачуємо',
+  'Потрібен оператор чат',
+  'Потрібні активні люди',
+  'Чат-менеджер потрібен',
+  'Без дзвінків і продажів',
+  'Робота без дзвінків',
+  'Шукаємо менеджера чатів',
+  'Графік 5/2',
+  'Не скам, не офіс'
 ];
 const DEFAULT_PREMODERATION_TIMEOUT_SEC = 60;
 const PREMODERATION_TIMEOUT_MARGIN_SEC = 3;
 const DEFAULT_PREMODERATION_PROMPT =
-  'Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек.';
+  'Вітаю в чаті, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} секунд. Інакше вас буде видалено.';
 const UA_NUMBER_WORDS: Record<number, string> = {
   0: 'нуль',
   1: 'один',
@@ -179,7 +177,7 @@ const HOMOGLYPHS: Record<string, string> = {
 const INVISIBLE_RE =
   /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFE00-\uFE0F\uFEFF]/gu;
 const NON_WORD_RE = /[^\p{L}\p{N}]+/gu;
-const SYSTEM_CLEANUP_RE = /(deleted message|видалив повідомлення)/iu;
+const SYSTEM_CLEANUP_RE = /(deleted message|видалив повідомлення|повідомлення видалено)/iu;
 
 function normalizeText(input: string): string {
   const lowered = input.toLowerCase().replace(INVISIBLE_RE, '');
@@ -586,7 +584,7 @@ async function markCallbackMessageProcessed(
     await telegramApi<boolean>(token, 'editMessageText', {
       chat_id: message.chat.id,
       message_id: message.message_id,
-      text: `${message.text}\n\nStatus: ${statusText}`
+      text: `${message.text}\n\nСтатус: ${statusText}`
     });
   } catch {
     // Ignore edit text errors.
@@ -849,8 +847,8 @@ async function resolvePremoderationFailure(
   const nowIso = new Date().toISOString();
   const userLabel = userLabelFromRow(row);
   const usernamePart = row.username ? `(@${row.username})` : '(no username)';
-  const reasonLabel = reason === 'timeout' ? 'timeout' : reason === 'wrong_digit' ? 'wrong answer' : 'expired answer';
-  const extra = typeof selectedDigit === 'number' ? `; selected ${selectedDigit}, expected ${row.correct_digit}` : '';
+  const reasonLabel = reason === 'timeout' ? 'час вичерпано' : reason === 'wrong_digit' ? 'невірна відповідь' : 'застарілий клік';
+  const extra = typeof selectedDigit === 'number' ? `; обрано ${selectedDigit}, очікувано ${row.correct_digit}` : '';
 
   const banRes = await telegramApi<boolean>(settings.token, 'banChatMember', {
     chat_id: settings.chatId,
@@ -869,7 +867,7 @@ async function resolvePremoderationFailure(
     db,
     'premod_failed',
     row.user_id,
-    `pre-moderation failed for ${userLabel} ${usernamePart}; reason ${reasonLabel}${extra}; ban=${banRes.ok ? 'ok' : 'fail'}`,
+    `пре-модерація провалена для ${userLabel} ${usernamePart}; причина: ${reasonLabel}${extra}; бан=${banRes.ok ? 'успішно' : 'помилка'}`,
     {
       user: {
         id: row.user_id,
@@ -884,19 +882,19 @@ async function resolvePremoderationFailure(
   if (settings.adminUserId) {
     const reasonText =
       reason === 'timeout'
-        ? 'timeout'
+        ? 'час вичерпано'
         : reason === 'wrong_digit'
-          ? `wrong answer${typeof selectedDigit === 'number' ? ` (${selectedDigit} instead of ${row.correct_digit})` : ''}`
-          : 'expired click';
+          ? `невірна відповідь${typeof selectedDigit === 'number' ? ` (${selectedDigit} замість ${row.correct_digit})` : ''}`
+          : 'застарілий клік';
     const lines = [
-      'Pre-moderation ban',
-      `User: ${userLabel} ${usernamePart}`,
-      `Reason: ${reasonText}`,
-      `Ban: ${banRes.ok ? 'ok' : `fail${banRes.description ? ` (${banRes.description})` : ''}`}`
+      'Бан пре-модерації',
+      `Користувач: ${userLabel} ${usernamePart}`,
+      `Причина: ${reasonText}`,
+      `Бан: ${banRes.ok ? 'успішно' : `помилка${banRes.description ? ` (${banRes.description})` : ''}`}`
     ];
     const buttons =
       logId && Number.isFinite(logId)
-        ? [[{ text: 'Unban', callback_data: `lg_unban:${logId}` }]]
+        ? [[{ text: 'Розбанити', callback_data: `lg_unban:${logId}` }]]
         : [];
     await sendAdminMessage(settings.token, settings.adminUserId, lines.join('\n'), buttons);
   }
@@ -932,7 +930,7 @@ async function resolvePremoderationSuccess(
     db,
     'premod_passed',
     row.user_id,
-    `pre-moderation passed for ${userLabelFromRow(row)}${row.username ? ` (@${row.username})` : ''}`,
+    `пре-модерацію пройдено для ${userLabelFromRow(row)}${row.username ? ` (@${row.username})` : ''}`,
     {
       user: {
         id: row.user_id,
@@ -1116,8 +1114,8 @@ async function startPremoderationForUser(
     db,
     'premod_started',
     user.id,
-    `pre-moderation started for ${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() +
-      `${user.username ? ` (@${user.username})` : ''}; challenge: ${plain}`,
+    `пре-модерацію розпочато для ${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() +
+      `${user.username ? ` (@${user.username})` : ''}; завдання: ${plain}`,
     {
       user: {
         id: user.id,
@@ -1215,7 +1213,7 @@ async function banAndDelete(
   const banResp = await telegramApi<boolean>(token, 'banChatMember', { chat_id: chatId, user_id: userId, revoke_messages: true });
 
   const action = deleteResp.ok && banResp.ok ? 'ban_delete' : 'ban_delete_partial';
-  const status = `delete=${deleteResp.ok ? 'ok' : 'fail'} ban=${banResp.ok ? 'ok' : 'fail'}`;
+  const status = `вид.=${deleteResp.ok ? 'успішно' : 'помилка'} бан=${banResp.ok ? 'успішно' : 'помилка'}`;
   const logId = await logAction(db, action, userId, `${details} (${status})`, { ...meta, source });
   return { action, logId };
 }
@@ -1268,7 +1266,7 @@ async function banDeleteQuarantineById(
   if (!row) return { ok: false, error: 'not found' };
 
   const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
-  const details = `manual review ban-delete user ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; text: ${row.text}`;
+  const details = `ручний бан за результатами перевірки користувача ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; текст: ${row.text}`;
 
   if (settings.safeMode) {
     await logAction(db, 'dry_run_manual_review', row.user_id, `SAFE MODE: would ban/delete from review queue; ${details}`, {
@@ -1306,7 +1304,7 @@ async function approveQuarantineById(db: D1Database, id: number): Promise<{ ok: 
   const existing = await db.prepare('SELECT id FROM quarantine WHERE id = ?').bind(id).first<{ id: number }>();
   if (!existing) return { ok: false, error: 'not found' };
   await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
-  await logAction(db, 'quarantine_approved', null, `approved quarantine id ${id}`);
+  await logAction(db, 'quarantine_approved', null, `схвалено пункт черги ${id}`);
   return { ok: true };
 }
 
@@ -1322,11 +1320,11 @@ async function unbanFromLogById(
     .first<{ id: number; action: string; user_id: number | null; details: string | null; meta_json: string | null }>();
   if (!row) return { ok: false, error: 'not found' };
   if (row.action !== 'ban_delete' && row.action !== 'ban_delete_partial' && row.action !== 'premod_failed') {
-    return { ok: false, error: 'unban is only available for ban records' };
+    return { ok: false, error: 'розбан доступний тільки для записів про бан' };
   }
 
   const userId = row.user_id;
-  if (!userId) return { ok: false, error: 'no user id in this history item' };
+  if (!userId) return { ok: false, error: 'у цьому записі історії немає id користувача' };
 
   let meta: LogMeta = {};
   try {
@@ -1341,7 +1339,7 @@ async function unbanFromLogById(
     user_id: userId,
     only_if_banned: true
   });
-  if (!unbanRes.ok) return { ok: false, error: unbanRes.description ?? 'unban failed' };
+  if (!unbanRes.ok) return { ok: false, error: unbanRes.description ?? 'помилка розбану' };
 
   const unbannedAt = new Date().toISOString();
   const mergedMeta: LogMeta = { ...meta, unbannedAt, unbannedBy: source };
@@ -1444,35 +1442,35 @@ app.post('/webhook/:pathToken', async (c) => {
     }
 
     if (!settings.adminUserId || String(callbackQuery.from.id) !== String(settings.adminUserId)) {
-      await answerCallbackQuery(settings.token, callbackQuery.id, 'Only configured admin can use this action');
+      await answerCallbackQuery(settings.token, callbackQuery.id, 'Тільки адмін може використовувати цю дію');
       return c.json({ ok: true, skipped: 'callback_not_admin' });
     }
 
     if (data.startsWith('qr_ban:')) {
       const id = Number(data.slice('qr_ban:'.length));
-      const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'invalid id' };
-      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Done' : result.error ?? 'failed');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Banned' : `Failed: ${result.error ?? 'failed'}`);
+      const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'невірний id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Виконано' : result.error ?? 'помилка');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Забанено' : `Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_qr_ban', result });
     }
     if (data.startsWith('qr_app:')) {
       const id = Number(data.slice('qr_app:'.length));
-      const result = Number.isFinite(id) ? await approveQuarantineById(db, id) : { ok: false, error: 'invalid id' };
-      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Approved' : result.error ?? 'failed');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Approved' : `Failed: ${result.error ?? 'failed'}`);
+      const result = Number.isFinite(id) ? await approveQuarantineById(db, id) : { ok: false, error: 'невірний id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Схвалено' : result.error ?? 'помилка');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Схвалено' : `Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_qr_app', result });
     }
     if (data.startsWith('lg_unban:')) {
       const id = Number(data.slice('lg_unban:'.length));
       const result = Number.isFinite(id)
         ? await unbanFromLogById(db, settings, id, 'telegram_callback')
-        : { ok: false, error: 'invalid id' };
-      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Unbanned' : result.error ?? 'failed');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Unbanned' : `Failed: ${result.error ?? 'failed'}`);
+        : { ok: false, error: 'невірний id' };
+      await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Розбанено' : result.error ?? 'помилка');
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Розбанено' : `Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_lg_unban', result });
     }
 
-    await answerCallbackQuery(settings.token, callbackQuery.id, 'Unknown action');
+    await answerCallbackQuery(settings.token, callbackQuery.id, 'Невідома дія');
     return c.json({ ok: true, skipped: 'unknown_callback_action' });
   }
 
@@ -1625,8 +1623,8 @@ app.post('/webhook/:pathToken', async (c) => {
       await sendAdminMessage(
         settings.token,
         settings.adminUserId,
-        `Hard match ban\nUser: ${userLabel} ${usernamePart}\nMatched: ${hardMatchTerms.join(', ')}\nMessage: ${text}`,
-        [[{ text: 'Unban', callback_data: `lg_unban:${banResult.logId}` }]]
+        `Бан за чорним списком\nКористувач: ${userLabel} ${usernamePart}\nЗбіг: ${hardMatchTerms.join(', ')}\nПовідомлення: ${text}`,
+        [[{ text: 'Розбанити', callback_data: `lg_unban:${banResult.logId}` }]]
       );
     }
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
@@ -1681,7 +1679,7 @@ app.post('/webhook/:pathToken', async (c) => {
         db,
         'quarantine_report',
         reportedUser.id,
-        `user report by ${reporterLabel} ${reporterUsername}; target ${targetLabel} ${targetUsername}; text: ${reportedText}`,
+        `скарга користувача від ${reporterLabel} ${reporterUsername}; ціль ${targetLabel} ${targetUsername}; текст: ${reportedText}`,
         {
           messageText: reportedText,
           matchedTerms: ['[user_report]'],
@@ -1708,11 +1706,11 @@ app.post('/webhook/:pathToken', async (c) => {
         await sendAdminMessage(
           settings.token,
           settings.adminUserId,
-          `Spam report\nReported by: ${reporterLabel} ${reporterUsername}\nReport text: ${reporterMessage || '(empty)'}\nTarget: ${targetLabel} ${targetUsername}\nMessage: ${reportedText}`,
+          `Скарга на спам\nПоскаржився: ${reporterLabel} ${reporterUsername}\nКоментар скаржника: ${reporterMessage || '(порожньо)'}\nЦіль: ${targetLabel} ${targetUsername}\nПовідомлення: ${reportedText}`,
           [
             [
-              { text: 'Ban & Delete', callback_data: `qr_ban:${quarantineId}` },
-              { text: 'Approve', callback_data: `qr_app:${quarantineId}` }
+              { text: 'Бан та видалити', callback_data: `qr_ban:${quarantineId}` },
+              { text: 'Дозволити', callback_data: `qr_app:${quarantineId}` }
             ]
           ]
         );
@@ -1743,18 +1741,18 @@ app.post('/webhook/:pathToken', async (c) => {
     db,
     'quarantine',
     sender.id,
-    `soft match by ${userLabel} ${usernamePart}; matched: ${softTerms.join(', ') || 'none'}; text: ${text}`,
+    `м'який збіг у ${userLabel} ${usernamePart}; знайдено: ${softTerms.join(', ') || 'немає'}; текст: ${text}`,
     { ...metaBase, matchedTerms: softTerms, source: 'soft_match' }
   );
   if (settings.adminUserId && quarantineRow?.id) {
     await sendAdminMessage(
       settings.token,
       settings.adminUserId,
-      `Review queue item\nUser: ${userLabel} ${usernamePart}\nMatched: ${softTerms.join(', ') || 'none'}\nMessage: ${text}`,
+      `Новий пункт у черзі перевірки\nКористувач: ${userLabel} ${usernamePart}\nЗбіг: ${softTerms.join(', ') || 'немає'}\nПовідомлення: ${text}`,
       [
         [
-          { text: 'Ban & Delete', callback_data: `qr_ban:${quarantineRow.id}` },
-          { text: 'Approve', callback_data: `qr_app:${quarantineRow.id}` }
+          { text: 'Бан та видалити', callback_data: `qr_ban:${quarantineRow.id}` },
+          { text: 'Дозволити', callback_data: `qr_app:${quarantineRow.id}` }
         ]
       ]
     );
@@ -1804,18 +1802,19 @@ app.get('/admin/api/settings', async (c) => {
 
 app.post('/admin/api/settings', async (c) => {
   const db = c.env.DB;
-  const body = await c.req.json<{ token?: string; chatId?: string; adminUserId?: string }>();
+  const body = await c.req.json<{ token?: string; chatId?: string; adminUserId?: string; safeMode?: boolean }>();
   const token = (body.token ?? '').trim();
   const chatId = (body.chatId ?? '').trim();
   const adminUserId = (body.adminUserId ?? '').trim();
-  if (!token || !chatId) return jsonError('token and chatId are required');
-  if (!/^-?\d+$/u.test(chatId)) return jsonError('chatId must be numeric');
-  if (adminUserId && !/^\d+$/u.test(adminUserId)) return jsonError('adminUserId must be numeric');
+  if (!token || !chatId) return jsonError('токен та chatId обов’язкові');
+  if (!/^-?\d+$/u.test(chatId)) return jsonError('chatId має бути числовим');
+  if (adminUserId && !/^\d+$/u.test(adminUserId)) return jsonError('adminUserId має бути числовим');
 
   const workerUrl = new URL(c.req.url).origin;
   const { webhook, webhookPathToken } = await upsertCoreSettings(db, token, chatId, workerUrl);
   await setSetting(db, 'ADMIN_USER_ID', adminUserId);
-  await logAction(db, 'settings_updated', null, `chat ${chatId}, webhook ${webhook.ok ? 'ok' : 'failed'}`);
+  await setSetting(db, 'SAFE_MODE', body.safeMode ? '1' : '0');
+  await logAction(db, 'settings_updated', null, `чат ${chatId}, вебхук ${webhook.ok ? 'успішно' : 'помилка'}, безп. режим ${body.safeMode ? 'увімкнено' : 'вимкнено'}`);
 
   return c.json({
     ok: true,
@@ -1841,28 +1840,27 @@ app.post('/admin/api/settings/moderation', async (c) => {
       .filter(Boolean);
   }
 
-  if (list.length === 0) return jsonError('keywords are required');
+  if (list.length === 0) return jsonError('ключові слова обов’язкові');
 
   await setSetting(c.env.DB, 'SOFT_SUSPICIOUS_KEYWORDS', serializeSoftKeywords(list));
-  await setSetting(c.env.DB, 'SAFE_MODE', body.safeMode ? '1' : '0');
   await logAction(
     c.env.DB,
     'soft_keywords_updated',
     null,
-    `updated moderation settings: soft keywords (${list.length}), safe mode ${body.safeMode ? 'on' : 'off'}`
+    `оновлено налаштування модерації: м’які ключові слова (${list.length})`
   );
-  return c.json({ ok: true, data: { keywords: list, safeMode: !!body.safeMode } });
+  return c.json({ ok: true, data: { keywords: list } });
 });
 
 app.post('/admin/api/settings/premoderation', async (c) => {
   const body = await c.req.json<{ enabled?: boolean; timeoutSec?: number; prompt?: string }>();
   const timeoutRaw = Number(body.timeoutSec ?? DEFAULT_PREMODERATION_TIMEOUT_SEC);
   if (!Number.isFinite(timeoutRaw) || timeoutRaw < 10 || timeoutRaw > 300) {
-    return jsonError('timeoutSec must be in range 10..300');
+    return jsonError('timeoutSec має бути в межах 10..300');
   }
   const timeoutSec = Math.floor(timeoutRaw);
   const prompt = String(body.prompt ?? '').trim() || DEFAULT_PREMODERATION_PROMPT;
-  if (prompt.length > 1000) return jsonError('prompt is too long');
+  if (prompt.length > 1000) return jsonError('повідомлення задовге');
 
   await setSetting(c.env.DB, 'PREMODERATION_ENABLED', body.enabled ? '1' : '0');
   await setSetting(c.env.DB, 'PREMODERATION_TIMEOUT_SEC', String(timeoutSec));
@@ -1871,7 +1869,7 @@ app.post('/admin/api/settings/premoderation', async (c) => {
     c.env.DB,
     'premod_settings_updated',
     null,
-    `pre-moderation ${body.enabled ? 'enabled' : 'disabled'}; timeout ${timeoutSec}s`
+    `пре-модерація ${body.enabled ? 'увімкнена' : 'вимкнена'}; тайм-аут ${timeoutSec}с`
   );
   return c.json({ ok: true, data: { enabled: !!body.enabled, timeoutSec, prompt } });
 });

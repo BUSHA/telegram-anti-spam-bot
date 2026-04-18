@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="uk">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Telegram anti-spam shield</title>
+    <title>Антиспам: панель керування</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -60,18 +60,18 @@
           <div class="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30 text-indigo-400">
             <svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" fill="currentColor"/></svg>
           </div>
-          <h1 class="text-2xl font-bold tracking-tight gradient-text">Anti-spam shield</h1>
+          <h1 class="text-2xl font-bold tracking-tight gradient-text">Антиспам: панель керування</h1>
           <span class="text-xs font-medium px-2 py-1 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.1.0</span>
         </div>
         <div class="flex items-center gap-3">
-          <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-xs font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">SAFE MODE ON</span>
+          <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-xs font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">БЕЗПЕЧНИЙ РЕЖИМ</span>
           <button id="refreshBtn" class="btn px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-600 transition-colors">
             <svg class="w-4 h-4 mr-2 inline" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            Refresh
+            Оновити
           </button>
           <button id="logoutBtn" class="btn px-4 py-2 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg border border-rose-500/50">
             <svg class="w-4 h-4 mr-2 inline" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-            Logout
+            Вийти
           </button>
         </div>
       </header>
@@ -81,30 +81,35 @@
         
         <!-- Sidebar Navigation -->
         <nav class="glass-panel w-full lg:w-64 flex-shrink-0 rounded-2xl p-2 sm:p-3 flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto overflow-y-hidden" style="scrollbar-width: none;">
-          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Dashboard</div>
+          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Панель керування</div>
           
           <button class="nav-tab active flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="queue">
             <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-            <span class="truncate w-full lg:w-auto">Review Queue</span>
+            <span class="truncate w-full lg:w-auto">Черга перевірки</span>
             <span id="badge-queue" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)]"></span>
           </button>
           
           <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left relative" data-target="history">
             <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            <span class="truncate w-full lg:w-auto">History</span>
+            <span class="truncate w-full lg:w-auto">Історія</span>
             <span id="badge-history" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)]"></span>
           </button>
           
-          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Configuration</div>
+          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Конфігурація</div>
           
           <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="blacklist">
              <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-             <span class="truncate w-full lg:w-auto">Filters</span>
+             <span class="truncate w-full lg:w-auto">Фільтри</span>
+          </button>
+
+          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="premod">
+            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <span class="truncate w-full lg:w-auto">Пре-модерація</span>
           </button>
 
           <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="settings">
             <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            <span class="truncate w-full lg:w-auto">Settings</span>
+            <span class="truncate w-full lg:w-auto">Налаштування</span>
           </button>
         </nav>
 
@@ -114,7 +119,7 @@
           <!-- TAB: Review Queue -->
           <section id="tab-queue" class="tab-section active p-3 sm:p-5 lg:p-6">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
-              <span class="text-amber-400">Review Queue</span>
+              <span class="text-amber-400">Черга перевірки</span>
             </h2>
             <div class="flex-1 overflow-y-auto pr-2 space-y-3" id="quarantineList"></div>
             <div id="quarantinePager" class="flex-shrink-0 mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-between gap-2 text-sm text-slate-400"></div>
@@ -124,11 +129,11 @@
           <section id="tab-history" class="tab-section p-3 sm:p-5 lg:p-6">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 flex-shrink-0">
               <h2 class="text-xl font-semibold flex items-center gap-2">
-                <span class="text-blue-400">Action History</span>
+                <span class="text-blue-400">Історія дій</span>
               </h2>
               <label class="flex items-center gap-2 text-sm px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 cursor-pointer transition hover:bg-slate-700/50">
                 <input id="includeSystemLogs" type="checkbox" class="checkbox-custom" />
-                <span class="text-slate-300">Show System Logs</span>
+                <span class="text-slate-300">Системні логи</span>
               </label>
             </div>
             <div class="flex-1 overflow-y-auto pr-2 space-y-3 text-sm" id="logsList"></div>
@@ -138,42 +143,38 @@
           <!-- TAB: Blacklist & Moderation -->
           <section id="tab-blacklist" class="tab-section p-3 sm:p-5 lg:p-6 overflow-y-auto">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
-              <span class="text-emerald-400">Filters & Moderation</span>
+              <span class="text-emerald-400">Фільтри та модерація</span>
             </h2>
 
             <!-- Blacklist Manager -->
             <div class="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 mb-8">
-              <h3 class="text-lg font-medium text-slate-200 mb-4">Blacklist Manager</h3>
-              <p class="text-sm text-slate-400 mb-4">Add exact phrases (one per line). Any matching messages will be automatically rejected and deleted.</p>
+              <h3 class="text-lg font-medium text-slate-200 mb-4">Чорний список</h3>
+              <p class="text-sm text-slate-400 mb-4">Додайте точні фрази (одна на рядок). Будь-які повідомлення, що збігаються, будуть автоматично видалені, а користувач забанений.</p>
               
               <textarea
                 id="blacklistTextarea"
                 rows="8"
                 class="input-field rounded-lg p-4 w-full text-sm leading-relaxed mb-4 font-mono text-slate-300 whitespace-pre"
-                placeholder="spam link&#10;test phrase&#10;..."
+                placeholder="посилання на спам&#10;тестова фраза&#10;..."
               ></textarea>
               <div class="flex justify-end">
-                <button id="saveBlacklist" class="btn px-6 py-2.5 bg-emerald-600 text-white rounded-lg shadow-lg shadow-emerald-600/20">Save Blacklist</button>
+                <button id="saveBlacklist" class="btn px-6 py-2.5 bg-emerald-600 text-white rounded-lg shadow-lg shadow-emerald-600/20">Зберегти чорний список</button>
               </div>
             </div>
 
             <!-- Soft Keywords -->
             <div class="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5">
-              <h3 class="text-lg font-medium text-slate-200 mb-4">Soft Keywords</h3>
-              <p class="text-sm text-slate-400 mb-4">Messages matching these words won't be outright banned if Safe Mode is disabled, but will trigger quarantine review.</p>
+              <h3 class="text-lg font-medium text-slate-200 mb-4">М'які ключові слова</h3>
+              <p class="text-sm text-slate-400 mb-4">Повідомлення, що містять ці слова, не будуть забанені автоматично, але потраплять у чергу перевірки.</p>
               
               <textarea
                 id="softKeywords"
                 rows="6"
                 class="input-field rounded-lg p-4 w-full text-sm leading-relaxed mb-4 font-mono text-slate-300"
-                placeholder="заработ\nбыстрые деньги\n..."
+                placeholder="заробіт\nшвидкі гроші\n..."
               ></textarea>
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3 px-4 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                  <input id="safeMode" type="checkbox" class="checkbox-custom" />
-                  <label for="safeMode" class="text-sm font-medium text-amber-200 cursor-pointer">Safe Mode (Simulate Only, Do not ban)</label>
-                </div>
-                <button id="saveModeration" class="btn px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20">Save Moderation Settings</button>
+              <div class="flex justify-end">
+                <button id="saveModeration" class="btn px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20">Зберегти налаштування модерації</button>
               </div>
             </div>
           </section>
@@ -181,65 +182,81 @@
           <!-- TAB: System Settings -->
           <section id="tab-settings" class="tab-section p-3 sm:p-5 lg:p-6 overflow-y-auto">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
-              <span class="text-indigo-400">System Setup</span>
+              <span class="text-indigo-400">Налаштування системи</span>
             </h2>
 
             <!-- Core Setup -->
             <div class="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 mb-8">
-              <h3 class="text-lg font-medium text-slate-200 mb-4">Telegram Bot Settings</h3>
+              <h3 class="text-lg font-medium text-slate-200 mb-4">Налаштування Telegram бота</h3>
               
               <div class="space-y-4 mb-6">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Bot Token</label>
+                  <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Токен бота</label>
                   <input id="token" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
-                  <p class="text-[11px] text-slate-500 mt-1">Get this from @BotFather</p>
+                  <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/BotFather" target="_blank" class="text-blue-400 hover:text-blue-300">@BotFather</a></p>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Target Chat ID</label>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">ID цільового чату</label>
                     <input id="chatId" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="-1001234567890" />
+                    <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/getidsbot" target="_blank" class="text-blue-400 hover:text-blue-300">@getidsbot</a></p>
                   </div>
                   <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Admin User ID</label>
+                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">ID адміністратора</label>
                     <input id="adminUserId" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456789" />
+                    <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/userinfobot" target="_blank" class="text-blue-400 hover:text-blue-300">@userinfobot</a></p>
+                  </div>
+                </div>
+                
+                <div class="pt-2">
+                  <div class="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20 transition-all hover:bg-amber-500/20">
+                    <input id="safeMode" type="checkbox" class="checkbox-custom" />
+                    <label for="safeMode" class="text-sm font-medium text-amber-200 cursor-pointer flex-1">
+                      Безпечний режим
+                      <span class="block text-[11px] text-amber-200/60 font-normal mt-0.5">Лише симуляція дій, бот не буде видаляти повідомлення чи банити користувачів</span>
+                    </label>
                   </div>
                 </div>
               </div>
               
               <div class="flex items-center justify-between border-t border-slate-700/50 pt-4">
                 <div id="webhookPathInfo" class="text-sm text-indigo-300 font-mono flex-1 truncate pr-4"></div>
-                <button id="saveSettings" class="btn px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20 shrink-0">Save & Set Webhook</button>
-              </div>
+                <button id="saveSettings" class="btn px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20 shrink-0">Зберегти та встановити вебхук</button>
             </div>
+          </section>
 
-            <!-- Pre-Moderation Setup -->
+          <!-- TAB: Pre-moderation -->
+          <section id="tab-premod" class="tab-section p-3 sm:p-5 lg:p-6 overflow-y-auto">
+            <!-- <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
+              <span class="text-teal-400">Пре-модерація</span>
+            </h2> -->
+
             <div class="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5">
               <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-medium text-slate-200">Pre-Moderation (Captcha)</h3>
+                <h3 class="text-lg font-medium text-slate-200">Пре-модерація (Капча)</h3>
                 <label class="flex items-center gap-2 cursor-pointer bg-teal-500/10 px-3 py-1.5 rounded-lg border border-teal-500/20">
                   <input id="premoderationEnabled" type="checkbox" class="checkbox-custom accent-teal-500" />
-                  <span class="text-sm font-medium text-teal-300">Enable Captcha</span>
+                  <span class="text-sm font-medium text-teal-300">Увімкнути капчу</span>
                 </label>
               </div>
-              <p class="text-sm text-slate-400 mb-5">Force new users to pass a basic verification challenge before they can send messages.</p>
+              <p class="text-sm text-slate-400 mb-5">Змушує нових користувачів пройти просту перевірку перед тим, як вони зможуть надсилати повідомлення.</p>
               
               <div class="space-y-4 mb-6">
                 <div>
-                  <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Timeout (Seconds)</label>
+                  <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Тайм-аут (секунди)</label>
                   <input id="premoderationTimeoutSec" type="number" min="10" max="300" class="input-field rounded-lg p-3 w-full md:w-48 text-sm" placeholder="60" />
                 </div>
                 <div>
-                  <label for="premoderationPrompt" class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Captcha Prompt Message</label>
-                  <div class="text-[11px] text-slate-400 mb-2 font-mono">Available variables: {user}, {digit}, {seconds}</div>
+                  <label for="premoderationPrompt" class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Повідомлення капчі</label>
+                  <div class="text-[11px] text-slate-400 mb-2 font-mono">Доступні змінні: {user}, {digit}, {seconds}</div>
                   <textarea id="premoderationPrompt" rows="4" class="input-field rounded-lg p-3 w-full text-sm leading-relaxed" placeholder="Вітаємо, {user}! Для перевірки оберіть цифру {digit} протягом {seconds} сек."></textarea>
                 </div>
               </div>
 
               <div class="flex justify-end border-t border-slate-700/50 pt-4">
-                <button id="savePremoderation" class="btn px-6 py-2.5 bg-teal-600 text-white rounded-lg shadow-lg shadow-teal-600/20 shrink-0">Save Captcha Settings</button>
+                <button id="savePremoderation" class="btn px-6 py-2.5 bg-teal-600 text-white rounded-lg shadow-lg shadow-teal-600/20 shrink-0">Зберегти налаштування капчі</button>
               </div>
             </div>
-
           </section>
         </div>
       </div>
@@ -303,7 +320,7 @@
 
           // 4. Load specific section data if needed
           if (targetName === 'blacklist') loadBlacklist().catch(() => {});
-          if (targetName === 'settings') loadSettings().catch(() => {});
+          if (targetName === 'settings' || targetName === 'premod') loadSettings().catch(() => {});
         });
       });
 
@@ -341,7 +358,7 @@
           ...options
         });
         const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed');
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Запит відхилено');
         return data;
       }
 
@@ -376,10 +393,10 @@
         const nextDisabled = paging.page >= paging.totalPages;
 
         root.innerHTML =
-          '<div class="font-medium text-slate-300 hidden sm:block">Page <span class="text-white">' + paging.page + '</span> / ' + paging.totalPages + ' <span class="mx-2 opacity-50">|</span> Total: ' + paging.total + '</div>' +
+          '<div class="font-medium text-slate-300 hidden sm:block">Сторінка <span class="text-white">' + paging.page + '</span> / ' + paging.totalPages + ' <span class="mx-2 opacity-50">|</span> Всього: ' + paging.total + '</div>' +
           '<div class="flex gap-2 w-full sm:w-auto justify-between sm:justify-start">' +
-          '<button class="pager-prev btn px-4 py-1.5 text-sm rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-700 text-slate-200" ' + (prevDisabled ? 'disabled' : '') + '>Previous</button>' +
-          '<button class="pager-next btn px-4 py-1.5 text-sm rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-700 text-slate-200" ' + (nextDisabled ? 'disabled' : '') + '>Next</button>' +
+          '<button class="pager-prev btn px-4 py-1.5 text-sm rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-700 text-slate-200" ' + (prevDisabled ? 'disabled' : '') + '>Назад</button>' +
+          '<button class="pager-next btn px-4 py-1.5 text-sm rounded-lg border border-slate-600 bg-slate-800/80 hover:bg-slate-700 text-slate-200" ' + (nextDisabled ? 'disabled' : '') + '>Далі</button>' +
           '</div>';
 
         const prev = root.querySelector('.pager-prev');
@@ -399,21 +416,26 @@
         $('premoderationTimeoutSec').value = String(data.data.premoderationTimeoutSec || 60);
         $('premoderationPrompt').value = data.data.premoderationPrompt || '';
         $('safeModeBadge').classList.toggle('hidden', !data.data.safeMode);
-        $('webhookPathInfo').textContent = data.data.webhookPath ? 'Webhook active: ' + data.data.webhookPath : 'Webhook not configured';
+        $('webhookPathInfo').textContent = data.data.webhookPath ? 'Вебхук активний: ' + data.data.webhookPath : 'Вебхук не налаштований';
       }
 
       async function saveSettings() {
         const data = await api('/admin/api/settings', {
-          method: 'POST', body: JSON.stringify({ token: $('token').value, chatId: $('chatId').value, adminUserId: $('adminUserId').value })
+          method: 'POST', body: JSON.stringify({ 
+            token: $('token').value, 
+            chatId: $('chatId').value, 
+            adminUserId: $('adminUserId').value,
+            safeMode: $('safeMode').checked
+          })
         });
-        if (data.data && data.data.webhookPath) $('webhookPathInfo').textContent = 'Webhook active: ' + data.data.webhookPath;
+        if (data.data && data.data.webhookPath) $('webhookPathInfo').textContent = 'Вебхук активний: ' + data.data.webhookPath;
+        $('safeModeBadge').classList.toggle('hidden', !$('safeMode').checked);
       }
 
       async function saveModeration() {
         await api('/admin/api/settings/moderation', {
-          method: 'POST', body: JSON.stringify({ keywords: $('softKeywords').value, safeMode: $('safeMode').checked })
+          method: 'POST', body: JSON.stringify({ keywords: $('softKeywords').value })
         });
-        $('safeModeBadge').classList.toggle('hidden', !$('safeMode').checked);
       }
 
       async function savePremoderation() {
@@ -473,7 +495,7 @@
         }
         
         if (data.data.length === 0) {
-           root.innerHTML = '<div class="text-center py-10 h-full flex flex-col items-center justify-center text-slate-500"><div class="p-4 bg-slate-800/50 rounded-full mb-3"><svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div><p>Queue is empty. Everything looks good!</p></div>';
+           root.innerHTML = '<div class="text-center py-10 h-full flex flex-col items-center justify-center text-slate-500"><div class="p-4 bg-slate-800/50 rounded-full mb-3"><svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div><p>Черга порожня. Все виглядає чудово!</p></div>';
         }
 
         for (const row of data.data) {
@@ -485,7 +507,7 @@
           
           let reporterHtml = '';
           if (row.reporter_user_id) {
-             reporterHtml = '<div class="mt-2 text-xs p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 flex items-start gap-2"><svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg><div><span class="font-semibold">Reported by:</span> ' + esc(reporterName || String(row.reporter_user_id)) + (row.reporter_username ? ' (@' + esc(row.reporter_username) + ')' : '') + (row.reporter_message ? '<div class="mt-1 opacity-80 italic">"' + esc(row.reporter_message) + '"</div>' : '') + '</div></div>';
+             reporterHtml = '<div class="mt-2 text-xs p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 flex items-start gap-2"><svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg><div><span class="font-semibold">Скаржник:</span> ' + esc(reporterName || String(row.reporter_user_id)) + (row.reporter_username ? ' (@' + esc(row.reporter_username) + ')' : '') + (row.reporter_message ? '<div class="mt-1 opacity-80 italic">"' + esc(row.reporter_message) + '"</div>' : '') + '</div></div>';
           }
 
           const el = rowCard(
@@ -494,18 +516,18 @@
                 '<div class="text-sm font-medium text-slate-400 flex items-center flex-wrap gap-x-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>' +
                 'ID: ' + row.user_id + usernamePart + namePart +
                 '</div>' +
-                '<div class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded font-mono">MSG ' + row.message_id + '</div>' +
+                '<div class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded font-mono">ПОВ ' + row.message_id + '</div>' +
               '</div>' +
               reporterHtml +
               '<div class="text-slate-200 bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 text-sm break-words whitespace-pre-wrap leading-relaxed shadow-inner font-mono">' + safeText + '</div>' +
               '<div class="flex gap-3 mt-2">' +
                 '<button data-id="' + row.id + '" class="ban-delete btn flex-1 py-2 text-sm text-rose-100 bg-rose-600/90 hover:bg-rose-600 rounded-lg shadow-lg shadow-rose-600/20 font-semibold border border-rose-500/50">' +
                   '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>' +
-                  'Ban & Delete' +
+                  'Бан та видалити' +
                 '</button>' +
                 '<button data-id="' + row.id + '" class="approve btn flex-1 py-2 text-sm text-slate-200 bg-slate-700/80 hover:bg-slate-700 rounded-lg font-semibold border border-slate-600">' +
                   '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>' +
-                  'Approve' +
+                  'Дозволити' +
                 '</button>' +
               '</div>' +
             '</div>'
@@ -534,7 +556,7 @@
       }
 
       function actionTitle(action) {
-        const titles = { ban_delete: 'Ban & Delete', ban_delete_partial: 'Ban/Delete Partial', quarantine: 'Quarantine', quarantine_report: 'Spam Report', premod_started: 'Pre-Mod Started', premod_passed: 'Pre-Mod Passed', premod_failed: 'Pre-Mod Failed', premod_error: 'Pre-Mod Error', premod_settings_updated: 'Pre-Mod Config', unban: 'Unban' };
+        const titles = { ban_delete: 'Бан та видалення', ban_delete_partial: 'Частковий бан/видалення', quarantine: 'Карантин', quarantine_report: 'Скарга на спам', premod_started: 'Пре-модерацію розпочато', premod_passed: 'Пре-модерацію пройдено', premod_failed: 'Пре-модерацію провалено', premod_error: 'Помилка пре-модерації', premod_settings_updated: 'Конфіг пре-модерації', unban: 'Розбанити' };
         return titles[action] || action;
       }
 
@@ -579,7 +601,7 @@
         }
 
         if (data.data.length === 0) {
-           root.innerHTML = '<div class="text-center py-10 h-full flex flex-col items-center justify-center text-slate-500"><div class="p-4 bg-slate-800/50 rounded-full mb-3"><svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><p>No log history found.</p></div>';
+           root.innerHTML = '<div class="text-center py-10 h-full flex flex-col items-center justify-center text-slate-500"><div class="p-4 bg-slate-800/50 rounded-full mb-3"><svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><p>Історія логів порожня.</p></div>';
         }
 
         for (const row of data.data) {
@@ -592,12 +614,12 @@
             
           const reporterName = [meta?.reporter?.firstName, meta?.reporter?.lastName].filter(Boolean).join(' ');
           const reporterLine = meta?.reporter
-             ? '<div class="mt-2 text-xs p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 flex items-start gap-2"><svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg><div><span class="font-semibold">Reported by:</span> ' + esc(reporterName || String(meta.reporter.id)) + (meta.reporter.username ? ' (@' + esc(meta.reporter.username) + ')' : '') + (meta.reporterMessage ? '<div class="mt-1 opacity-80 italic">"' + esc(meta.reporterMessage) + '"</div>' : '') + '</div></div>' : '';
+             ? '<div class="mt-2 text-xs p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 flex items-start gap-2"><svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg><div><span class="font-semibold">Заявник:</span> ' + esc(reporterName || String(meta.reporter.id)) + (meta.reporter.username ? ' (@' + esc(meta.reporter.username) + ')' : '') + (meta.reporterMessage ? '<div class="mt-1 opacity-80 italic">"' + esc(meta.reporterMessage) + '"</div>' : '') + '</div></div>' : '';
 
-          const matchLine = matchedTerms.length ? '<div class="text-xs text-amber-300/80 mt-2 flex flex-wrap gap-1 items-center"><span class="font-semibold mr-1">Matched:</span> ' + matchedTerms.map(t => '<span class="px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30 font-mono text-[10px]">' + esc(t) + '</span>').join('') + '</div>' : '';
+          const matchLine = matchedTerms.length ? '<div class="text-xs text-amber-300/80 mt-2 flex flex-wrap gap-1 items-center"><span class="font-semibold mr-1">Збіг:</span> ' + matchedTerms.map(t => '<span class="px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30 font-mono text-[10px]">' + esc(t) + '</span>').join('') + '</div>' : '';
           const messageLine = messageText ? '<div class="mt-3 text-slate-300"><div class="p-3 text-xs rounded-lg bg-slate-900/80 border border-slate-700/80 break-words whitespace-pre-wrap leading-relaxed font-mono">' + highlightText(messageText, matchedTerms) + '</div></div>' : '';
           const detailsLine = messageText ? '' : '<div class="mt-3 text-slate-400 text-xs italic bg-slate-900/40 p-2.5 rounded border border-slate-800">' + esc(row.details || '') + '</div>';
-          const unbanLine = meta?.unbannedAt ? '<div class="mt-2 text-xs text-emerald-400 flex items-center gap-1.5 font-medium"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Unbanned ' + (meta.unbannedBy ? ' by ' + esc(meta.unbannedBy) : 'manually') + '</div>' : '';
+          const unbanLine = meta?.unbannedAt ? '<div class="mt-2 text-xs text-emerald-400 flex items-center gap-1.5 font-medium"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Розбанено ' + (meta.unbannedBy ? ' користувачем ' + (meta.unbannedBy === 'dashboard' ? 'адмін-панелі' : 'бота') : 'вручну') + '</div>' : '';
 
           const canUnban = (row.action === 'ban_delete' || row.action === 'ban_delete_partial' || row.action === 'premod_failed') && !meta?.unbannedAt;
           const date = new Date(row.timestamp);
@@ -613,8 +635,8 @@
               '</div>' +
               userLine + reporterLine + matchLine + unbanLine + messageLine + detailsLine +
               '<div class="flex gap-2 mt-2 justify-end border-t border-slate-700/30 pt-3">' +
-                (canUnban ? '<button data-id="' + row.id + '" class="unban btn px-3 py-1.5 text-xs bg-emerald-600/80 hover:bg-emerald-600 text-white rounded font-medium border border-emerald-500/50 shadow-lg shadow-emerald-600/10">Unban</button>' : '') +
-                '<button data-id="' + row.id + '" class="delete-log btn px-2.5 py-1.5 text-xs text-slate-400 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/30 rounded border border-slate-700 transition-colors" title="Delete Log"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>' +
+                (canUnban ? '<button data-id="' + row.id + '" class="unban btn px-3 py-1.5 text-xs bg-emerald-600/80 hover:bg-emerald-600 text-white rounded font-medium border border-emerald-500/50 shadow-lg shadow-emerald-600/10">Розбанити</button>' : '') +
+                '<button data-id="' + row.id + '" class="delete-log btn px-2.5 py-1.5 text-xs text-slate-400 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 hover:border-rose-500/30 rounded border border-slate-700 transition-colors" title="Видалити лог"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>' +
               '</div>' +
             '</div>'
           );
@@ -657,10 +679,10 @@
         }
       }
 
-      $('saveSettings').addEventListener('click', () => saveSettings().then(() => showToast('Saved')).catch(e => showToast(e.message, 'error')));
-      $('saveModeration').addEventListener('click', () => saveModeration().then(() => showToast('Moderation settings saved')).catch(e => showToast(e.message, 'error')));
-      $('savePremoderation').addEventListener('click', () => savePremoderation().then(() => showToast('Pre-moderation settings saved')).catch(e => showToast(e.message, 'error')));
-      $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => showToast('Blacklist saved')).catch(e => showToast(e.message, 'error')));
+      $('saveSettings').addEventListener('click', () => saveSettings().then(() => showToast('Налаштування збережено')).catch(e => showToast(e.message, 'error')));
+      $('saveModeration').addEventListener('click', () => saveModeration().then(() => showToast('Налаштування модерації збережено')).catch(e => showToast(e.message, 'error')));
+      $('savePremoderation').addEventListener('click', () => savePremoderation().then(() => showToast('Налаштування капчі збережено')).catch(e => showToast(e.message, 'error')));
+      $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => showToast('Чорний список збережено')).catch(e => showToast(e.message, 'error')));
 
       $('refreshBtn').addEventListener('click', () => refreshAll().catch(e => showToast(e.message, 'error')));
       $('logoutBtn').addEventListener('click', () => { window.location.href = '/cdn-cgi/access/logout'; });
