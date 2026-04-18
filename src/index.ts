@@ -149,6 +149,16 @@ const UA_NUMBER_WORDS: Record<number, string> = {
 const PREMOD_MIN_NUMBER = 1;
 const PREMOD_MAX_NUMBER = 30;
 
+function formatFriendlyDate(date: Date): string {
+  const months = ['Січня', 'Лютого', 'Березня', 'Квітня', 'Травня', 'Червня', 'Липня', 'Серпня', 'Вересня', 'Жовтня', 'Листопада', 'Грудня'];
+  const month = months[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  return `${day} ${month} ${year}, ${hours}:${minutes}`;
+}
+
 const RUNTIME_SETTINGS_CACHE: {
   expiresAt: number;
   value: RuntimeSettings | null;
@@ -1341,10 +1351,12 @@ async function unbanFromLogById(
   });
   if (!unbanRes.ok) return { ok: false, error: unbanRes.description ?? 'помилка розбану' };
 
-  const unbannedAt = new Date().toISOString();
-  const mergedMeta: LogMeta = { ...meta, unbannedAt, unbannedBy: source };
+  const now = new Date();
+  const unbannedAtIso = now.toISOString();
+  const unbannedAtFriendly = formatFriendlyDate(now);
+  const mergedMeta: LogMeta = { ...meta, unbannedAt: unbannedAtIso, unbannedBy: source };
   const cleanedDetails = (row.details ?? '').replace(/\s*\|\s*UNBANNED.*$/u, '').trim();
-  const detailsWithNote = `${cleanedDetails} | UNBANNED at ${unbannedAt} via ${source}`;
+  const detailsWithNote = `${cleanedDetails} | UNBANNED at ${unbannedAtFriendly} via ${source}`;
   await db
     .prepare('UPDATE logs SET details = ?, meta_json = ? WHERE id = ?')
     .bind(detailsWithNote, JSON.stringify(mergedMeta), id)
