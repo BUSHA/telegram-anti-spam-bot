@@ -2,6 +2,8 @@
 
 Цей проект — простий антиспам-бот для Telegram, що працює на Cloudflare Workers, використовує D1 для бази даних та Queues для надійної обробки капчі. Для невеликого чату вистачить лімітів безкоштовного плану.
 
+![Dashboard Screenshot](Screenshot.png)
+
 ## Основні можливості
 
 - **Розумна нормалізація тексту**: Ефективна боротьба зі спамом, що використовує гомогліфи (схожі за виглядом латинські літери замість кириличних), приховані Unicode-символи та інші методи обходу фільтрів.
@@ -55,6 +57,8 @@
 # Telegram Anti-Spam Bot (English)
 
 This project is a powerful Telegram anti-spam bot built on Cloudflare Workers, using D1 for database and Queues for robust captcha processing. For a small chat, the free plan limits are sufficient.
+
+![Dashboard Screenshot](Screenshot.png)
 
 ## Key Features
 
