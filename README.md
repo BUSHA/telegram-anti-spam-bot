@@ -1,59 +1,70 @@
-# Telegram Anti-Spam Bot (Cloudflare Workers + D1)
+# Telegram Anti-Spam Bot (Cloudflare Workers + D1 + Queues)
 
-## What is implemented
-- Cloudflare Worker using Hono (`src/index.ts`)
-- D1 schema (`schema.sql`)
-- Telegram webhook processing with secret-token validation
-- Cyrillic-oriented normalization (lowercase, homoglyph replacement, invisible char stripping)
-- Hard-match blacklist: immediate delete + ban
-- Soft-match quarantine: links/suspicious terms go to review queue
-- `/admin` SPA (Vanilla JS + Tailwind CDN)
-- JSON API under `/admin/api/*` for settings, blacklist, quarantine, logs
-- Auto `setWebhook` when token/chat settings are saved
-- Admin-user bypass via Telegram `getChatAdministrators` cache
+Цей проект — простий антиспам-бот для Telegram, що працює на Cloudflare Workers, використовує D1 для бази даних та Queues для надійної обробки капчі. Для невеликого чату вистачить лімітів безкоштовного плану.
 
-## Files
-- Worker config: `wrangler.toml`
-- Worker code: `src/index.ts`
-- DB schema: `schema.sql`
+## Основні можливості
 
-## Setup
-1. Create D1 database:
-```bash
-wrangler d1 create telegram_antispam
-```
+- **Розумна нормалізація тексту**: Ефективна боротьба зі спамом, що використовує гомогліфи (схожі за виглядом латинські літери замість кириличних), приховані Unicode-символи та інші методи обходу фільтрів.
+- **Дворівнева фільтрація (Anti-Spam)**:
+  - **Чорний список (Hard match)**: Негайне видалення повідомлення та постійний бан користувача.
+  - **Карантин (Soft match)**: Повідомлення з підозрілими словами або посиланнями автоматично потрапляють у чергу на перевірку модератором у зручній адмін-панелі.
+- **Система Премодерації (Капча)**: 
+  - Нові користувачі повинні підтвердити, що вони не боти, розв'язавши просту задачу (вибір цифри, написаної словом).
+  - Надійне керування таймаутами через Cloudflare Queues (навіть якщо воркер перезапуститься, капча буде оброблена).
+  - Тимчасове обмеження прав користувача (read-only) до проходження перевірки.
+- **Безпечний режим (Safe Mode)**: Можливість тестувати фільтри в "сухому" режимі — повідомлення не видаляються, а користувачі не баняться (система лише записує, що б вона зробила).
+- **Зручна Адмін-панель**: 
+  - Перегляд історії дій у реальному часі.
+  - Керування чорним списком та стоп-словами.
+  - Модерація карантину (схвалення або видалення повідомлень).
+  - Гнучкі налаштування капчі та системних параметрів.
+- **Локалізація**: Повна підтримка української мови для повідомлень у чаті та інтерфейсу керування.
 
-2. Put returned `database_id` into `wrangler.toml`.
+## Технологічний стек
 
-3. First migration with `curl`:
-```bash
-curl -X POST "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/d1/database/<DATABASE_ID>/query" \
-  -H "Authorization: Bearer <CF_API_TOKEN>" \
-  -H "Content-Type: application/json" \
-  --data-binary @<(jq -n --arg sql "$(cat schema.sql)" '{sql: [$sql]}')
-```
+- **Core**: [Hono](https://hono.dev/) на Cloudflare Workers.
+- **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite).
+- **Background Tasks**: [Cloudflare Queues](https://developers.cloudflare.com/queues/) для таймаутів капчі.
+- **UI**: Vanilla JS + Tailwind CSS.
+- **Security**: Інтеграція з Cloudflare Zero Trust (Access) для захисту панелі керування.
 
-4. Install and deploy:
-```bash
-npm install
-npm run types
-wrangler deploy
-```
+## Швидкий запуск
 
-After every `wrangler.toml` change, rerun:
-```bash
-npm run types
-```
+Повна інструкція з розгортання знаходиться у файлі [DEPLOYMENT.md](DEPLOYMENT.md).
 
-## Zero Trust protection for dashboard
-Protect `/admin/*` with Cloudflare Access policy (Application + Policy), and allow only your identities/groups.  
-This project intentionally does not implement internal login logic.
+1. **Створення інфраструктури**:
+   ```bash
+   wrangler d1 create telegram_antispam
+   wrangler queues create anti-spam-delay-queue
+   ```
+2. **Конфігурація**: Вкажіть отримані `database_id` у `wrangler.toml`.
+3. **Деплой**:
+   ```bash
+   npm install
+   npm run types
+   npx wrangler deploy
+   ```
+4. **Налаштування**: Перейдіть за посиланням воркера `/admin` і введіть токен бота та ID чату.
 
-## Runtime flow
-- Telegram sends updates to `POST /webhook`
-- Worker verifies header `X-Telegram-Bot-Api-Secret-Token`
-- Worker checks configured `CHAT_ID`
-- Admin users are ignored
-- Content is normalized and checked against blacklist (`u` regex flag enforced)
-- Suspicious non-hard-match content is inserted into `quarantine`
-- Dashboard operators review and take actions from `/admin`
+## Безпека адмін-панелі
+
+Проект спеціально не містить внутрішньої системи логіну. Шлях `/admin/*` **обов'язково** має бути захищений через Cloudflare Access (Application + Policy). Це надійніше і дозволяє використовувати ваші існуючі identity-провайдери.
+
+---
+
+# Telegram Anti-Spam Bot (English)
+
+This project is a powerful Telegram anti-spam bot built on Cloudflare Workers, using D1 for database and Queues for robust captcha processing. For a small chat, the free plan limits are sufficient.
+
+## Key Features
+
+- **Text Normalization**: Effectively handles spam that uses homoglyphs, hidden Unicode characters, and other evasion techniques.
+- **Two-tier Filtering**:
+  - **Blacklist (Hard match)**: Immediate message deletion and user ban. Supports plain text and RegEx.
+  - **Quarantine (Soft match)**: Suspicious messages are held for manual review in the dashboard.
+- **Pre-moderation (Captcha)**: New users must solve a simple text-based captcha. Powered by Cloudflare Queues for reliable timeout handling.
+- **Safe Mode**: Test your settings without actually deleting messages or banning users.
+- **Modern Dashboard**: Real-time logs, blacklist management, and quarantine moderation.
+- **Cloudflare Zero Trust**: Protect the dashboard with Cloudflare Access.
+
+Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for detailed setup instructions.
