@@ -41,7 +41,7 @@
       @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
       
-      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; min-h-0; }
+      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
       .tab-section.active { display: flex; }
       
       @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -56,23 +56,26 @@
 
     <main class="max-w-7xl mx-auto p-2 sm:p-4 md:p-6 space-y-4 sm:space-y-6 relative z-10 w-full flex-1 flex flex-col min-h-0">
       <!-- Header -->
-      <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel rounded-2xl p-4 md:px-6 flex-shrink-0">
+      <header class="flex items-center justify-between glass-panel rounded-2xl p-4 md:px-6 flex-shrink-0">
         <div class="flex items-center gap-3">
           <div class="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30 text-indigo-400">
             <svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" fill="currentColor"/></svg>
           </div>
-          <h1 class="text-2xl font-bold tracking-tight gradient-text">Антиспам: панель керування</h1>
-          <span class="text-xs font-medium px-2 py-1 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.2.0</span>
+          <h1 class="text-xl sm:text-2xl font-bold tracking-tight gradient-text">Антиспам</h1>
+          <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.2.0</span>
         </div>
         <div class="flex items-center gap-3">
-          <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-xs font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">БЕЗПЕЧНИЙ РЕЖИМ</span>
-          <button id="refreshBtn" class="btn px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-600 transition-colors">
+          <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">БЕЗПЕКА</span>
+          <button id="refreshBtn" class="hidden md:btn px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-600 transition-colors">
             <svg class="w-4 h-4 mr-2 inline" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
             Оновити
           </button>
-          <button id="logoutBtn" class="btn px-4 py-2 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg border border-rose-500/50">
+          <button id="logoutBtn" class="hidden md:btn px-4 py-2 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg border border-rose-500/50">
             <svg class="w-4 h-4 mr-2 inline" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
             Вийти
+          </button>
+          <button id="openMenuBtn" class="md:hidden btn p-2 bg-slate-800 text-slate-200 rounded-lg border border-slate-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
           </button>
         </div>
       </header>
@@ -81,36 +84,34 @@
       <div class="flex flex-col lg:flex-row gap-4 sm:gap-6 flex-1 min-h-0 overflow-hidden pb-2 lg:pb-0">
         
         <!-- Sidebar Navigation -->
-        <nav class="glass-panel w-full lg:w-64 flex-shrink-0 rounded-2xl p-2 sm:p-3 flex flex-row lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto overflow-y-hidden" style="scrollbar-width: none;">
-          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Панель керування</div>
+        <nav class="hidden lg:flex glass-panel lg:w-64 flex-shrink-0 rounded-2xl p-3 flex-col gap-1 overflow-y-auto">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mb-1">Панель керування</div>
           
-          <button class="nav-tab active flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="queue">
-            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-            <span class="truncate w-full lg:w-auto">Черга перевірки</span>
-            <span id="badge-queue" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)]"></span>
+          <button class="nav-tab active py-3 px-4 text-sm" data-target="queue">
+            <svg class="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            <span>Черга перевірки</span>
+            <span id="badge-queue" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full shadow-[0_0_8px_rgba(245,158,11,0.4)]"></span>
           </button>
           
-          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left relative" data-target="history">
-            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            <span class="truncate w-full lg:w-auto">Історія</span>
-            <span id="badge-history" class="hidden absolute top-1 right-1 lg:static lg:ml-auto px-1.5 lg:px-2 py-0.5 text-[9px] lg:text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)]"></span>
+          <button class="nav-tab py-3 px-4 text-sm relative" data-target="history">
+            <svg class="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span>Історія</span>
+            <span id="badge-history" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.4)]"></span>
           </button>
           
-          <div class="hidden lg:block text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Конфігурація</div>
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-2 mt-4 mb-1 border-t border-slate-700/50 pt-4">Конфігурація</div>
           
-          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="blacklist">
-             <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-             <span class="truncate w-full lg:w-auto">Фільтри</span>
+          <button class="nav-tab py-3 px-4 text-sm" data-target="blacklist">
+             <svg class="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+             <span>Фільтри</span>
           </button>
-
-          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="premod">
-            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-            <span class="truncate w-full lg:w-auto">Пре-модерація</span>
+          <button class="nav-tab py-3 px-4 text-sm" data-target="premod">
+            <svg class="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <span>Пре-модерація</span>
           </button>
-
-          <button class="nav-tab flex-1 min-w-[70px] lg:flex-none justify-center lg:justify-start flex-col lg:flex-row text-[10px] sm:text-xs lg:text-sm py-2 px-1 lg:py-3 lg:px-4 text-center lg:text-left" data-target="settings">
-            <svg class="w-5 h-5 lg:mr-2 mb-1 lg:mb-0 mx-auto lg:mx-0 shrink-0" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-            <span class="truncate w-full lg:w-auto">Налаштування</span>
+          <button class="nav-tab py-3 px-4 text-sm" data-target="settings">
+            <svg class="w-5 h-5 mr-3 shrink-0" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            <span>Налаштування</span>
           </button>
         </nav>
 
@@ -128,11 +129,11 @@
 
           <!-- TAB: Action History -->
           <section id="tab-history" class="tab-section pt-3 px-3 pb-0 sm:pt-5 sm:px-5 sm:pb-0 lg:pt-6 lg:px-6 lg:pb-0">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 flex-shrink-0">
-              <h2 class="text-xl font-semibold flex items-center gap-2">
+            <div class="flex flex-row justify-between items-center gap-2 mb-6 flex-shrink-0">
+              <h2 class="text-lg sm:text-xl font-semibold flex items-center gap-2">
                 <span class="text-blue-400">Історія дій</span>
               </h2>
-              <label class="flex items-center gap-2 text-sm px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 cursor-pointer transition hover:bg-slate-700/50">
+              <label class="flex items-center gap-2 text-[11px] sm:text-sm px-2 sm:px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 cursor-pointer transition hover:bg-slate-700/50 whitespace-nowrap">
                 <input id="includeSystemLogs" type="checkbox" class="checkbox-custom" />
                 <span class="text-slate-300">Системні логи</span>
               </label>
@@ -220,10 +221,10 @@
                 </div>
               </div>
               
-              <div class="flex items-center justify-between border-t border-slate-700/50 pt-4">
-                <div id="webhookPathInfo" class="text-sm text-indigo-300 font-mono flex-1 truncate pr-4"></div>
-                <button id="saveSettings" class="btn px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20 shrink-0">Зберегти та встановити вебхук</button>
-            </div>
+              <div class="flex flex-col md:flex-row items-center md:justify-between gap-4 border-t border-slate-700/50 pt-4">
+                <button id="saveSettings" class="order-1 md:order-2 btn w-full md:w-auto px-6 py-2.5 bg-indigo-600 text-white rounded-lg shadow-lg shadow-indigo-600/20 shrink-0 text-sm sm:text-base">Зберегти та встановити вебхук</button>
+                <div id="webhookPathInfo" class="order-2 md:order-1 text-center md:text-left text-[11px] sm:text-sm text-indigo-300/80 font-mono flex-1 truncate w-full"></div>
+              </div>
           </section>
 
           <!-- TAB: Pre-moderation -->
@@ -262,19 +263,85 @@
         </div>
       </div>
     </main>
+ 
+    <!-- Mobile Menu Overlay -->
+    <div id="mobileMenu" class="fixed inset-0 z-[100] transition-transform duration-300 translate-x-full lg:hidden">
+      <div class="absolute inset-0 bg-slate-950/95 backdrop-blur-2xl"></div>
+      <div class="relative h-full flex flex-col p-6 overflow-hidden">
+        <div class="flex items-center justify-between mb-8">
+          <div class="flex items-center gap-3">
+            <div class="p-2 bg-indigo-500/20 rounded-xl border border-indigo-500/30 text-indigo-400">
+              <svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" fill="currentColor"/></svg>
+            </div>
+            <h2 class="text-xl font-bold gradient-text tracking-tight">Навігація</h2>
+          </div>
+          <button id="closeMenuBtn" class="p-2 text-slate-400 hover:text-white transition-colors bg-slate-800 rounded-lg">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto space-y-6 pb-6 pr-1">
+          <div class="space-y-2">
+            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] px-4 mb-3">Панель</div>
+            <button class="nav-tab w-full py-4 px-5 active" data-target="queue">
+              <svg class="w-6 h-6 mr-4 shrink-0" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+              <span class="text-base font-semibold">Черга перевірки</span>
+              <span id="badge-queue-mobile" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-amber-500 text-amber-950 rounded-full"></span>
+            </button>
+            <button class="nav-tab w-full py-4 px-5" data-target="history">
+              <svg class="w-6 h-6 mr-4 shrink-0" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <span class="text-base font-semibold">Історія дій</span>
+              <span id="badge-history-mobile" class="hidden ml-auto px-2 py-0.5 text-[10px] font-bold bg-blue-500 text-blue-950 rounded-full"></span>
+            </button>
+          </div>
+ 
+          <div class="space-y-2 pt-4 border-t border-slate-800">
+            <div class="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] px-4 mb-3">Конфігурація</div>
+            <button class="nav-tab w-full py-4 px-5" data-target="blacklist">
+               <svg class="w-6 h-6 mr-4 shrink-0" viewBox="0 0 24 24"><path d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+               <span class="text-base font-semibold">Фільтри та правила</span>
+            </button>
+            <button class="nav-tab w-full py-4 px-5" data-target="premod">
+              <svg class="w-6 h-6 mr-4 shrink-0" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <span class="text-base font-semibold">Пре-модерація</span>
+            </button>
+            <button class="nav-tab w-full py-4 px-5" data-target="settings">
+              <svg class="w-6 h-6 mr-4 shrink-0" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+              <span class="text-base font-semibold">Налаштування</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="mt-auto pt-6 border-t border-slate-800">
+          <button id="mobileLogoutBtn" class="btn w-full py-4 bg-rose-600 text-white rounded-xl font-bold shadow-lg shadow-rose-600/20 active:bg-rose-700">
+            <svg class="w-5 h-5 mr-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            Вийти
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Toasts -->
     <div id="toastContainer" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
 
     <script>
       const $ = (id) => document.getElementById(id);
+      
+      const getStored = (key, def) => {
+        const val = localStorage.getItem(key);
+        if (val === null) return def;
+        if (typeof def === 'number') return parseInt(val, 10) || def;
+        return val;
+      };
+
       const state = {
-        quarantinePage: 1,
-        logsPage: 1,
+        quarantinePage: getStored('quarantinePage', 1),
+        logsPage: getStored('logsPage', 1),
         pageSize: 20,
         topQueueId: 0,
         topHistoryId: 0
       };
+      
       const memSeen = { queue: 0, history: 0 };
 
       function readSeen(key) {
@@ -303,17 +370,24 @@
         tab.addEventListener('click', (e) => {
           const target = e.currentTarget;
           const targetName = target.dataset.target;
-
-          // 1. Switch UI immediately
-          document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+          
+          localStorage.setItem('activeTab', targetName);
+ 
+          // 1. Switch UI immediately across all tab instances (desktop & mobile)
+          document.querySelectorAll('.nav-tab').forEach(t => {
+            if (t.dataset.target === targetName) {
+              t.classList.add('active');
+            } else {
+              t.classList.remove('active');
+            }
+          });
           document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
-          target.classList.add('active');
+          
           const section = $('tab-' + targetName);
           if (section) section.classList.add('active');
           
-          // 2. Reset page numbers to 1 on navigation to ensure latest data is visible
-          if (targetName === 'queue') state.quarantinePage = 1;
-          if (targetName === 'history') state.logsPage = 1;
+          // 2. Close mobile menu
+          $('mobileMenu').classList.add('translate-x-full');
           
           // 3. Load specific section data only when tab is active
           if (targetName === 'queue') loadQuarantine().catch(() => {});
@@ -477,20 +551,27 @@
           if (isQueueActive) {
             writeSeen('lastSeenQueueId', state.topQueueId);
             $('badge-queue').classList.add('hidden');
+            $('badge-queue-mobile').classList.add('hidden');
           } else if (state.topQueueId > tempLastSeen) {
             // Count unseen items (only accurate if they are in the current fetched batch)
             const unseenCount = data.data.filter(r => r.id > tempLastSeen).length;
             if (unseenCount > 0) {
-              $('badge-queue').textContent = unseenCount + (unseenCount === state.pageSize ? '+' : '');
+              const text = unseenCount + (unseenCount === state.pageSize ? '+' : '');
+              $('badge-queue').textContent = text;
               $('badge-queue').classList.remove('hidden');
+              $('badge-queue-mobile').textContent = text;
+              $('badge-queue-mobile').classList.remove('hidden');
             } else {
               $('badge-queue').classList.add('hidden');
+              $('badge-queue-mobile').classList.add('hidden');
             }
           } else {
             $('badge-queue').classList.add('hidden');
+            $('badge-queue-mobile').classList.add('hidden');
           }
         } else {
           $('badge-queue').classList.add('hidden');
+          $('badge-queue-mobile').classList.add('hidden');
         }
         
         if (data.data.length === 0) {
@@ -550,15 +631,16 @@
 
         pager('quarantinePager', data.paging, (page) => {
           state.quarantinePage = page;
+          localStorage.setItem('quarantinePage', page);
           loadQuarantine().catch(e => showToast(e.message, 'error'));
         });
       }
-
+ 
       function actionTitle(action) {
         const titles = { ban_delete: 'Бан та видалення', ban_delete_partial: 'Частковий бан/видалення', quarantine: 'Карантин', quarantine_report: 'Скарга на спам', premod_started: 'Пре-модерацію розпочато', premod_passed: 'Пре-модерацію пройдено', premod_failed: 'Пре-модерацію провалено', premod_error: 'Помилка пре-модерації', premod_settings_updated: 'Конфіг пре-модерації', unban: 'Розбанити' };
         return titles[action] || action;
       }
-
+ 
       function actionColor(action) {
         action = String(action || '');
         if (action.includes('error') || action.includes('failed') || action === 'ban_delete' || action === 'ban_delete_partial') return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
@@ -566,7 +648,7 @@
         if (action.includes('quarantine')) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
         return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
       }
-
+ 
       async function loadLogs() {
         const includeSystem = $('includeSystemLogs').checked ? '1' : '0';
         const data = await api('/admin/api/logs?page=' + state.logsPage + '&pageSize=' + state.pageSize + '&includeSystem=' + includeSystem);
@@ -580,29 +662,36 @@
           const tempLastSeen = readSeen('lastSeenHistoryId');
           const historyTab = document.querySelector('[data-target="history"]');
           const isHistoryActive = historyTab && historyTab.classList.contains('active');
-
+ 
           if (isHistoryActive) {
             writeSeen('lastSeenHistoryId', state.topHistoryId);
             $('badge-history').classList.add('hidden');
+            $('badge-history-mobile').classList.add('hidden');
           } else if (state.topHistoryId > tempLastSeen) {
             const unseenCount = data.data.filter(r => r.id > tempLastSeen).length;
             if (unseenCount > 0) {
-              $('badge-history').textContent = unseenCount + (unseenCount === state.pageSize ? '+' : '');
+              const text = unseenCount + (unseenCount === state.pageSize ? '+' : '');
+              $('badge-history').textContent = text;
               $('badge-history').classList.remove('hidden');
+              $('badge-history-mobile').textContent = text;
+              $('badge-history-mobile').classList.remove('hidden');
             } else {
               $('badge-history').classList.add('hidden');
+              $('badge-history-mobile').classList.add('hidden');
             }
           } else {
             $('badge-history').classList.add('hidden');
+            $('badge-history-mobile').classList.add('hidden');
           }
         } else {
           $('badge-history').classList.add('hidden');
+          $('badge-history-mobile').classList.add('hidden');
         }
-
+ 
         if (data.data.length === 0) {
            root.innerHTML = '<div class="text-center py-10 h-full flex flex-col items-center justify-center text-slate-500"><div class="p-4 bg-slate-800/50 rounded-full mb-3"><svg class="w-8 h-8 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><p>Історія логів порожня.</p></div>';
         }
-
+ 
         for (const row of data.data) {
           const meta = parseMeta(row.meta_json);
           const messageText = meta?.messageText || '';
@@ -614,16 +703,16 @@
           const reporterName = [meta?.reporter?.firstName, meta?.reporter?.lastName].filter(Boolean).join(' ');
           const reporterLine = meta?.reporter
              ? '<div class="mt-2 text-xs p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 flex items-start gap-2"><svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg><div><span class="font-semibold">Заявник:</span> ' + esc(reporterName || String(meta.reporter.id)) + (meta.reporter.username ? ' (@' + esc(meta.reporter.username) + ')' : '') + (meta.reporterMessage ? '<div class="mt-1 opacity-80 italic">"' + esc(meta.reporterMessage) + '"</div>' : '') + '</div></div>' : '';
-
+ 
           const matchLine = matchedTerms.length ? '<div class="text-xs text-amber-300/80 mt-2 flex flex-wrap gap-1 items-center"><span class="font-semibold mr-1">Збіг:</span> ' + matchedTerms.map(t => '<span class="px-1.5 py-0.5 bg-amber-500/20 rounded border border-amber-500/30 font-mono text-[10px]">' + esc(t) + '</span>').join('') + '</div>' : '';
           const messageLine = messageText ? '<div class="mt-3 text-slate-300"><div class="p-3 text-xs rounded-lg bg-slate-900/80 border border-slate-700/80 break-words whitespace-pre-wrap leading-relaxed font-mono">' + highlightText(messageText, matchedTerms) + '</div></div>' : '';
           const detailsLine = messageText ? '' : '<div class="mt-3 text-slate-400 text-xs italic bg-slate-900/40 p-2.5 rounded border border-slate-800">' + esc(row.details || '') + '</div>';
           const unbanLine = meta?.unbannedAt ? '<div class="mt-2 text-xs text-emerald-400 flex items-center gap-1.5 font-medium"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Розбанено ' + (meta.unbannedBy ? ' користувачем ' + (meta.unbannedBy === 'dashboard' ? 'адмін-панелі' : 'бота') : 'вручну') + '</div>' : '';
-
+ 
           const canUnban = (row.action === 'ban_delete' || row.action === 'ban_delete_partial' || row.action === 'premod_failed') && !meta?.unbannedAt;
           const date = new Date(row.timestamp);
           const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' <span class="text-[10px] ml-1 opacity-70">' + date.toLocaleDateString([], {month: 'short', day: 'numeric'}) + '</span>';
-
+ 
           const el = rowCard(
             '<div class="flex flex-col gap-2">' +
               '<div class="flex items-start justify-between gap-3">' +
@@ -641,22 +730,26 @@
           );
           root.appendChild(el);
         }
-
+ 
         root.querySelectorAll('.delete-log').forEach(btn => {
           btn.addEventListener('click', async () => {
             await api('/admin/api/logs/' + btn.dataset.id, { method: 'DELETE' });
             await loadLogs();
           });
         });
-
+ 
         root.querySelectorAll('.unban').forEach(btn => {
           btn.addEventListener('click', async () => {
             await api('/admin/api/logs/' + btn.dataset.id + '/unban', { method: 'POST' });
             await loadLogs();
           });
         });
-
-        pager('logsPager', data.paging, (page) => { state.logsPage = page; loadLogs().catch(e => showToast(e.message, 'error')); });
+ 
+        pager('logsPager', data.paging, (page) => { 
+            state.logsPage = page; 
+            localStorage.setItem('logsPage', page);
+            loadLogs().catch(e => showToast(e.message, 'error')); 
+        });
       }
 
       // Minor helper wrapper for updating history when creating rules
@@ -693,10 +786,25 @@
       $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => showToast('Чорний список збережено')).catch(e => showToast(e.message, 'error')));
 
       $('refreshBtn').addEventListener('click', () => refreshAll().catch(e => showToast(e.message, 'error')));
-      $('logoutBtn').addEventListener('click', () => { window.location.href = '/cdn-cgi/access/logout'; });
+      
+      const logout = () => { window.location.href = '/cdn-cgi/access/logout'; };
+      $('logoutBtn').addEventListener('click', logout);
+      $('mobileLogoutBtn').addEventListener('click', logout);
+      
+      $('openMenuBtn').addEventListener('click', () => $('mobileMenu').classList.remove('translate-x-full'));
+      $('closeMenuBtn').addEventListener('click', () => $('mobileMenu').classList.add('translate-x-full'));
+      
       $('includeSystemLogs').addEventListener('change', () => { state.logsPage = 1; loadLogs().catch(e => showToast(e.message, 'error')); });
-
-      refreshAll().catch(e => showToast(e.message, 'error'));
+ 
+      // Initialize active tab from storage
+      const savedTab = localStorage.getItem('activeTab') || 'queue';
+      const initialTabEl = document.querySelector(`.nav-tab[data-target="${savedTab}"]`);
+      if (initialTabEl) {
+          // Trigger the click logic but specifically load data
+          initialTabEl.click();
+      } else {
+          refreshAll().catch(e => showToast(e.message, 'error'));
+      }
     </script>
   </body>
 </html>
