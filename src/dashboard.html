@@ -6,6 +6,7 @@
     <title>Антиспам: панель керування</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'%3E%3Cpath d='M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z'%2F%3E%3C%2Fsvg%3E">
     <style>
       html { font-size: 13px; }
       @media (min-width: 768px) { html { font-size: 16px; } }
@@ -40,20 +41,20 @@
       @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
       
-      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; }
+      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; min-h-0; }
       .tab-section.active { display: flex; }
       
       @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
   </head>
-  <body class="min-h-screen relative overflow-x-hidden flex flex-col">
+  <body class="h-screen relative overflow-hidden flex flex-col">
     <!-- Subtle Background Glows -->
     <div class="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
       <div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-900/30 blur-[120px]"></div>
       <div class="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-900/20 blur-[120px]"></div>
     </div>
 
-    <main class="max-w-7xl mx-auto p-2 sm:p-4 md:p-6 space-y-4 sm:space-y-6 relative z-10 w-full flex-1 flex flex-col h-[100dvh] lg:h-screen lg:overflow-hidden">
+    <main class="max-w-7xl mx-auto p-2 sm:p-4 md:p-6 space-y-4 sm:space-y-6 relative z-10 w-full flex-1 flex flex-col min-h-0">
       <!-- Header -->
       <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel rounded-2xl p-4 md:px-6 flex-shrink-0">
         <div class="flex items-center gap-3">
@@ -61,7 +62,7 @@
             <svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" fill="currentColor"/></svg>
           </div>
           <h1 class="text-2xl font-bold tracking-tight gradient-text">Антиспам: панель керування</h1>
-          <span class="text-xs font-medium px-2 py-1 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.1.0</span>
+          <span class="text-xs font-medium px-2 py-1 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.2.0</span>
         </div>
         <div class="flex items-center gap-3">
           <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-xs font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">БЕЗПЕЧНИЙ РЕЖИМ</span>
@@ -114,19 +115,19 @@
         </nav>
 
         <!-- Content Area -->
-        <div class="glass-panel flex-1 rounded-2xl flex flex-col overflow-hidden relative">
+        <div class="glass-panel flex-1 rounded-2xl flex flex-col overflow-hidden relative min-h-0">
           
           <!-- TAB: Review Queue -->
-          <section id="tab-queue" class="tab-section active p-3 sm:p-5 lg:p-6">
+          <section id="tab-queue" class="tab-section active pt-3 px-3 pb-0 sm:pt-5 sm:px-5 sm:pb-0 lg:pt-6 lg:px-6 lg:pb-0">
             <h2 class="text-xl font-semibold mb-6 flex items-center gap-2">
               <span class="text-amber-400">Черга перевірки</span>
             </h2>
-            <div class="flex-1 overflow-y-auto pr-2 space-y-3" id="quarantineList"></div>
-            <div id="quarantinePager" class="flex-shrink-0 mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-between gap-2 text-sm text-slate-400"></div>
+            <div class="flex-1 overflow-y-auto pr-2 space-y-3 min-h-0" id="quarantineList"></div>
+            <div id="quarantinePager" class="flex-shrink-0 py-4 border-t border-slate-700/50 flex items-center justify-between gap-2 text-sm text-slate-400 sticky bottom-0 bg-[#1e293b]/95 backdrop-blur-md -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6 z-10 transition-all"></div>
           </section>
 
           <!-- TAB: Action History -->
-          <section id="tab-history" class="tab-section p-3 sm:p-5 lg:p-6">
+          <section id="tab-history" class="tab-section pt-3 px-3 pb-0 sm:pt-5 sm:px-5 sm:pb-0 lg:pt-6 lg:px-6 lg:pb-0">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 flex-shrink-0">
               <h2 class="text-xl font-semibold flex items-center gap-2">
                 <span class="text-blue-400">Історія дій</span>
@@ -136,8 +137,8 @@
                 <span class="text-slate-300">Системні логи</span>
               </label>
             </div>
-            <div class="flex-1 overflow-y-auto pr-2 space-y-3 text-sm" id="logsList"></div>
-            <div id="logsPager" class="flex-shrink-0 mt-4 pt-4 border-t border-slate-700/50 flex items-center justify-between gap-2 text-sm text-slate-400"></div>
+            <div class="flex-1 overflow-y-auto pr-2 space-y-3 text-sm min-h-0" id="logsList"></div>
+            <div id="logsPager" class="flex-shrink-0 py-4 border-t border-slate-700/50 flex items-center justify-between gap-2 text-sm text-slate-400 sticky bottom-0 bg-[#1e293b]/95 backdrop-blur-md -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6 z-10 transition-all"></div>
           </section>
 
           <!-- TAB: Blacklist & Moderation -->
@@ -270,7 +271,7 @@
       const state = {
         quarantinePage: 1,
         logsPage: 1,
-        pageSize: 50,
+        pageSize: 20,
         topQueueId: 0,
         topHistoryId: 0
       };
@@ -314,11 +315,9 @@
           if (targetName === 'queue') state.quarantinePage = 1;
           if (targetName === 'history') state.logsPage = 1;
           
-          // 3. Refresh dynamic data to ensure badges are up-to-date across all sections
-          loadQuarantine().catch(() => {});
-          loadLogs().catch(() => {});
-
-          // 4. Load specific section data if needed
+          // 3. Load specific section data only when tab is active
+          if (targetName === 'queue') loadQuarantine().catch(() => {});
+          if (targetName === 'history') loadLogs().catch(() => {});
           if (targetName === 'blacklist') loadBlacklist().catch(() => {});
           if (targetName === 'settings' || targetName === 'premod') loadSettings().catch(() => {});
         });
@@ -667,9 +666,18 @@
       }
 
       async function refreshAll() {
+        const activeTab = document.querySelector('.nav-tab.active');
+        const targetName = activeTab ? activeTab.dataset.target : 'queue';
+        
         $('refreshBtn').classList.add('opacity-50', 'cursor-wait');
         try {
-          const results = await Promise.allSettled([loadSettings(), loadBlacklist(), loadQuarantine(), loadLogs()]);
+          const tasks = [];
+          if (targetName === 'queue') tasks.push(loadQuarantine());
+          if (targetName === 'history') tasks.push(loadLogs());
+          if (targetName === 'blacklist') tasks.push(loadBlacklist());
+          if (targetName === 'settings' || targetName === 'premod') tasks.push(loadSettings());
+          
+          const results = await Promise.allSettled(tasks);
           const firstFailed = results.find((item) => item.status === 'rejected');
           if (firstFailed && firstFailed.status === 'rejected') {
             throw firstFailed.reason;
