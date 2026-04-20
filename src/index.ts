@@ -1919,10 +1919,10 @@ app.post('/webhook/:pathToken', async (c) => {
 
 app.post('/webhook', (c) => jsonError('not_found', 404));
 
-app.get('/admin', (c) => {
+app.get('/admin/', async (c) => {
+  await purgeOldLogs(c.env.DB);
   return c.html(ADMIN_HTML);
 });
-app.get('/admin/', (c) => c.html(ADMIN_HTML));
 
 app.get('/admin/api/settings', async (c) => {
   const db = c.env.DB;
@@ -2056,6 +2056,7 @@ app.post('/admin/api/blacklist/sync', async (c) => {
 });
 
 app.get('/admin/api/quarantine', async (c) => {
+  await purgeOldLogs(c.env.DB);
   const { page, pageSize, offset } = parsePagination(c.req.raw, 20, 100);
   const [rows, totalRow] = await Promise.all([
     c.env.DB
@@ -2088,7 +2089,17 @@ app.post('/admin/api/quarantine/:id/approve', async (c) => {
   return c.json({ ok: true });
 });
 
+async function purgeOldLogs(db: D1Database, limit = 1000): Promise<void> {
+  try {
+    await db.prepare('DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT ?)').bind(limit).run();
+    await db.prepare('DELETE FROM premoderation_challenges WHERE id NOT IN (SELECT id FROM premoderation_challenges ORDER BY id DESC LIMIT ?)').bind(limit).run();
+  } catch (err) {
+    console.error('Failed to purge old logs:', err);
+  }
+}
+
 app.get('/admin/api/logs', async (c) => {
+  await purgeOldLogs(c.env.DB);
   const { page, pageSize, offset } = parsePagination(c.req.raw, 20, 100);
   const includeSystem = new URL(c.req.url).searchParams.get('includeSystem') === '1';
 
@@ -2137,6 +2148,7 @@ app.post('/admin/api/logs/:id/unban', async (c) => {
 });
 
 app.get('/admin', async (c) => {
+  await purgeOldLogs(c.env.DB);
   return c.html(ADMIN_HTML);
 });
 
