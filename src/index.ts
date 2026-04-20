@@ -530,6 +530,7 @@ async function sendAdminMessage(
     const payload: Record<string, unknown> = {
       chat_id: adminUserId,
       text,
+      parse_mode: 'HTML',
       disable_web_page_preview: true
     };
     if (buttons.length > 0) payload.reply_markup = { inline_keyboard: buttons };
@@ -594,10 +595,11 @@ async function markCallbackMessageProcessed(
     await telegramApi<boolean>(token, 'editMessageText', {
       chat_id: message.chat.id,
       message_id: message.message_id,
-      text: `${message.text}\n\nСтатус: ${statusText}`
+      text: `${esc(message.text)}\n\n<b>Статус:</b> ${esc(statusText)}`,
+      parse_mode: 'HTML'
     });
   } catch {
-    // Ignore edit text errors.
+    // Ignore edit failures.
   }
 }
 
@@ -654,12 +656,99 @@ function buildPremoderationPrompt(
   return { html, plain };
 }
 
+function esc(str: string | number | undefined | null): string {
+  if (str === undefined || str === null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatAdminNotification(
+  type: 'premod_failure' | 'hard_match' | 'user_report' | 'soft_match',
+  data: {
+    userLabel: string;
+    username?: string | null;
+    reasonText?: string;
+    banStatusText?: string;
+    matchedTerms?: string[];
+    text?: string;
+    logId?: number | null;
+    quarantineId?: number | null;
+    reporterLabel?: string;
+    reporterUsername?: string | null;
+    reporterMessage?: string | null;
+    targetLabel?: string;
+    targetUsername?: string | null;
+  }
+): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
+  let text = '';
+  let buttons: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  const userPart = `👤 <b>Користувач:</b> ${esc(data.userLabel)} ${data.username ? `(@${esc(data.username)})` : ''}`;
+
+  switch (type) {
+    case 'premod_failure':
+      text = [
+        '<b>❌ Пре-модерацію провалено</b>\n',
+        userPart,
+        `📝 <b>Причина:</b> ${esc(data.reasonText)}`,
+        `🛡 <b>Статус бану:</b> ${data.banStatusText}`
+      ].join('\n');
+      if (data.logId) buttons = [[{ text: 'Розбанити', callback_data: `lg_unban:${data.logId}` }]];
+      break;
+
+    case 'hard_match':
+      text = [
+        '<b>🚫 Бан за чорним списком</b>\n',
+        userPart,
+        `🔍 <b>Збіг:</b> ${esc(data.matchedTerms?.join(', '))}`,
+        `💬 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+      ].join('\n');
+      if (data.logId) buttons = [[{ text: 'Розбанити', callback_data: `lg_unban:${data.logId}` }]];
+      break;
+
+    case 'user_report':
+      text = [
+        '<b>⚠️ Скарга на спам</b>\n',
+        `📢 <b>Поскаржився:</b> ${esc(data.reporterLabel)} ${data.reporterUsername ? `(@${esc(data.reporterUsername)})` : ''}`,
+        `💬 <b>Коментар:</b> ${esc(data.reporterMessage || '(порожньо)')}\n`,
+        `🎯 <b>Ціль:</b> ${esc(data.targetLabel)} ${data.targetUsername ? `(@${esc(data.targetUsername)})` : ''}`,
+        `📝 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+      ].join('\n');
+      if (data.quarantineId) {
+        buttons = [[
+          { text: 'Бан та видалити', callback_data: `qr_ban:${data.quarantineId}` },
+          { text: 'Дозволити', callback_data: `qr_app:${data.quarantineId}` }
+        ]];
+      }
+      break;
+
+    case 'soft_match':
+      text = [
+        '<b>⏳ Новий пункт у черзі перевірки</b>\n',
+        userPart,
+        `🔍 <b>Збіг:</b> ${esc(data.matchedTerms?.join(', ') || 'немає')}`,
+        `💬 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+      ].join('\n');
+      if (data.quarantineId) {
+        buttons = [[
+          { text: 'Бан та видалити', callback_data: `qr_ban:${data.quarantineId}` },
+          { text: 'Дозволити', callback_data: `qr_app:${data.quarantineId}` }
+        ]];
+      }
+      break;
+  }
+
+  return { text, buttons };
+}
+
 function buildUserMention(userId: number, username?: string | null, firstName?: string | null): { html: string; plain: string } {
   if (username) {
     const handle = `@${username}`;
     return { html: handle, plain: handle };
   }
-  const name = (firstName ?? '').trim() || 'користувач';
+  const name = esc((firstName ?? '').trim() || 'користувач');
   return {
     html: `<a href="tg://user?id=${userId}">${name}</a>`,
     plain: name
@@ -896,17 +985,15 @@ async function resolvePremoderationFailure(
         : reason === 'wrong_digit'
           ? `невірна відповідь${typeof selectedDigit === 'number' ? ` (${selectedDigit} замість ${row.correct_digit})` : ''}`
           : 'застарілий клік';
-    const lines = [
-      'Бан пре-модерації',
-      `Користувач: ${userLabel} ${usernamePart}`,
-      `Причина: ${reasonText}`,
-      `Бан: ${banRes.ok ? 'успішно' : `помилка${banRes.description ? ` (${banRes.description})` : ''}`}`
-    ];
-    const buttons =
-      logId && Number.isFinite(logId)
-        ? [[{ text: 'Розбанити', callback_data: `lg_unban:${logId}` }]]
-        : [];
-    await sendAdminMessage(settings.token, settings.adminUserId, lines.join('\n'), buttons);
+
+    const { text, buttons } = formatAdminNotification('premod_failure', {
+      userLabel,
+      username: row.username,
+      reasonText,
+      banStatusText: banRes.ok ? '✅ успішно' : `❌ помилка${banRes.description ? ` (${banRes.description})` : ''}`,
+      logId
+    });
+    await sendAdminMessage(settings.token, settings.adminUserId, text, buttons);
   }
 }
 
@@ -1462,14 +1549,14 @@ app.post('/webhook/:pathToken', async (c) => {
       const id = Number(data.slice('qr_ban:'.length));
       const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'невірний id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Виконано' : result.error ?? 'помилка');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Забанено' : `Помилка: ${result.error ?? 'помилка'}`);
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? '✅ Забанено' : `❌ Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_qr_ban', result });
     }
     if (data.startsWith('qr_app:')) {
       const id = Number(data.slice('qr_app:'.length));
       const result = Number.isFinite(id) ? await approveQuarantineById(db, id) : { ok: false, error: 'невірний id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Схвалено' : result.error ?? 'помилка');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Схвалено' : `Помилка: ${result.error ?? 'помилка'}`);
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? '✅ Схвалено' : `❌ Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_qr_app', result });
     }
     if (data.startsWith('lg_unban:')) {
@@ -1478,7 +1565,7 @@ app.post('/webhook/:pathToken', async (c) => {
         ? await unbanFromLogById(db, settings, id, 'telegram_callback')
         : { ok: false, error: 'невірний id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Розбанено' : result.error ?? 'помилка');
-      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? 'Розбанено' : `Помилка: ${result.error ?? 'помилка'}`);
+      await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? '✅ Розбанено' : `❌ Помилка: ${result.error ?? 'помилка'}`);
       return c.json({ ok: true, action: 'callback_lg_unban', result });
     }
 
@@ -1538,6 +1625,49 @@ app.post('/webhook/:pathToken', async (c) => {
 
   const message = update.message;
   if (!message) return c.json({ ok: true, skipped: 'no_message' });
+
+  // Secret command for admin to test notifications
+  if (
+    message.chat.type === 'private' &&
+    settings.adminUserId &&
+    String(message.from?.id) === String(settings.adminUserId) &&
+    message.text?.trim() === 'Test notifications'
+  ) {
+    const dummyUser = { id: 12345, username: 'tester', firstName: 'Тест', lastName: 'Користувач' };
+    const dummyLabel = `${dummyUser.firstName} ${dummyUser.lastName}`;
+
+    const tests: Array<{ type: 'premod_failure' | 'hard_match' | 'user_report' | 'soft_match', data: any }> = [
+      {
+        type: 'premod_failure',
+        data: { userLabel: dummyLabel, username: dummyUser.username, reasonText: 'невірна відповідь (3 замість 5)', banStatusText: '✅ успішно', logId: 999 }
+      },
+      {
+        type: 'hard_match',
+        data: { userLabel: dummyLabel, username: dummyUser.username, matchedTerms: ['заробляй', 'крипто', 'кешбек'], text: 'Привіт! Хочеш заробляти 500$ на день? Пиши мені!', logId: 999 }
+      },
+      {
+        type: 'user_report',
+        data: { reporterLabel: 'Адмін', reporterUsername: 'admin', reporterMessage: 'спамер у лічці', targetLabel: dummyLabel, targetUsername: dummyUser.username, text: 'Підписуйтесь на мій канал про крипту!', quarantineId: 888 }
+      },
+      {
+        type: 'soft_match',
+        data: { userLabel: dummyLabel, username: dummyUser.username, matchedTerms: ['Потрібен оператор чат'], text: 'Потрібен оператор чату, графік 5/2, висока зп.', quarantineId: 777 }
+      }
+    ];
+
+    for (const test of tests) {
+      const { text, buttons } = formatAdminNotification(test.type, test.data);
+      await sendAdminMessage(settings.token, settings.adminUserId, text, buttons);
+    }
+
+    await telegramApi(settings.token, 'sendMessage', {
+      chat_id: message.chat.id,
+      text: '✅ Тестові повідомлення надіслано.'
+    });
+
+    return c.json({ ok: true, action: 'test_notifications_sent' });
+  }
+
   if (String(message.chat.id) !== String(settings.chatId)) return c.json({ ok: true, skipped: 'wrong_chat' });
 
   if (message.new_chat_members?.length) {
@@ -1632,12 +1762,14 @@ app.post('/webhook/:pathToken', async (c) => {
       { ...metaBase, matchedTerms: hardMatchTerms }
     );
     if (settings.adminUserId && banResult.logId) {
-      await sendAdminMessage(
-        settings.token,
-        settings.adminUserId,
-        `Бан за чорним списком\nКористувач: ${userLabel} ${usernamePart}\nЗбіг: ${hardMatchTerms.join(', ')}\nПовідомлення: ${text}`,
-        [[{ text: 'Розбанити', callback_data: `lg_unban:${banResult.logId}` }]]
-      );
+      const { text: adminText, buttons } = formatAdminNotification('hard_match', {
+        userLabel,
+        username: sender.username,
+        matchedTerms: hardMatchTerms,
+        text,
+        logId: banResult.logId
+      });
+      await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
     }
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
   }
@@ -1715,17 +1847,17 @@ app.post('/webhook/:pathToken', async (c) => {
       );
 
       if (settings.adminUserId && quarantineId) {
-        await sendAdminMessage(
-          settings.token,
-          settings.adminUserId,
-          `Скарга на спам\nПоскаржився: ${reporterLabel} ${reporterUsername}\nКоментар скаржника: ${reporterMessage || '(порожньо)'}\nЦіль: ${targetLabel} ${targetUsername}\nПовідомлення: ${reportedText}`,
-          [
-            [
-              { text: 'Бан та видалити', callback_data: `qr_ban:${quarantineId}` },
-              { text: 'Дозволити', callback_data: `qr_app:${quarantineId}` }
-            ]
-          ]
-        );
+        const { text: adminText, buttons } = formatAdminNotification('user_report', {
+          userLabel: targetLabel, // used for userPart if we want, but user_report has custom fields
+          reporterLabel,
+          reporterUsername: sender.username,
+          reporterMessage,
+          targetLabel,
+          targetUsername: reportedUser.username,
+          text: reportedText,
+          quarantineId
+        });
+        await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
       }
       return c.json({ ok: true, action: 'quarantine_report' });
     }
@@ -1757,17 +1889,14 @@ app.post('/webhook/:pathToken', async (c) => {
     { ...metaBase, matchedTerms: softTerms, source: 'soft_match' }
   );
   if (settings.adminUserId && quarantineRow?.id) {
-    await sendAdminMessage(
-      settings.token,
-      settings.adminUserId,
-      `Новий пункт у черзі перевірки\nКористувач: ${userLabel} ${usernamePart}\nЗбіг: ${softTerms.join(', ') || 'немає'}\nПовідомлення: ${text}`,
-      [
-        [
-          { text: 'Бан та видалити', callback_data: `qr_ban:${quarantineRow.id}` },
-          { text: 'Дозволити', callback_data: `qr_app:${quarantineRow.id}` }
-        ]
-      ]
-    );
+    const { text: adminText, buttons } = formatAdminNotification('soft_match', {
+      userLabel,
+      username: sender.username,
+      matchedTerms: softTerms,
+      text,
+      quarantineId: quarantineRow.id
+    });
+    await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
   }
   return c.json({ ok: true, action: 'quarantine', matchedTerms: softTerms });
 });
