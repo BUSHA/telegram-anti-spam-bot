@@ -47,7 +47,12 @@ type TelegramCallbackQuery = {
   id: string;
   from: { id: number; username?: string; first_name?: string; last_name?: string };
   data?: string;
-  message?: { message_id: number; text?: string; chat: { id: number } };
+  message?: {
+    message_id: number;
+    text?: string;
+    chat: { id: number };
+    entities?: Array<{ type: string; offset: number; length: number }>;
+  };
 };
 
 type LogMeta = {
@@ -589,14 +594,25 @@ async function markCallbackMessageProcessed(
   }
 
   if (!message.text) return;
-  if (/\n\nStatus:/u.test(message.text)) return;
+  if (/\n\nСтатус:/u.test(message.text)) return;
+
+  const statusLabel = `Статус: ${statusText}`;
+  const newText = `${message.text}\n\n${statusLabel}`;
+  const oldTextLength = message.text.length;
 
   try {
     await telegramApi<boolean>(token, 'editMessageText', {
       chat_id: message.chat.id,
       message_id: message.message_id,
-      text: `${esc(message.text)}\n\n<b>Статус:</b> ${esc(statusText)}`,
-      parse_mode: 'HTML'
+      text: newText,
+      entities: [
+        ...(message.entities || []),
+        {
+          type: 'bold',
+          offset: oldTextLength + 2, // account for \n\n
+          length: statusLabel.length
+        }
+      ]
     });
   } catch {
     // Ignore edit failures.
@@ -685,15 +701,15 @@ function formatAdminNotification(
   let text = '';
   let buttons: Array<Array<{ text: string; callback_data: string }>> = [];
 
-  const userPart = `👤 <b>Користувач:</b> ${esc(data.userLabel)} ${data.username ? `(@${esc(data.username)})` : ''}`;
+  const userPart = `<b>Користувач:</b> ${esc(data.userLabel)} ${data.username ? `(@${esc(data.username)})` : ''}`;
 
   switch (type) {
     case 'premod_failure':
       text = [
         '<b>❌ Пре-модерацію провалено</b>\n',
         userPart,
-        `📝 <b>Причина:</b> ${esc(data.reasonText)}`,
-        `🛡 <b>Статус бану:</b> ${data.banStatusText}`
+        `<b>Причина:</b> ${esc(data.reasonText)}`,
+        `<b>Статус бану:</b> ${data.banStatusText}`
       ].join('\n');
       if (data.logId) buttons = [[{ text: 'Розбанити', callback_data: `lg_unban:${data.logId}` }]];
       break;
@@ -702,8 +718,8 @@ function formatAdminNotification(
       text = [
         '<b>🚫 Бан за чорним списком</b>\n',
         userPart,
-        `🔍 <b>Збіг:</b> ${esc(data.matchedTerms?.join(', '))}`,
-        `💬 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+        `<b>Збіг:</b> ${esc(data.matchedTerms?.join(', '))}`,
+        `<b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
       ].join('\n');
       if (data.logId) buttons = [[{ text: 'Розбанити', callback_data: `lg_unban:${data.logId}` }]];
       break;
@@ -711,10 +727,10 @@ function formatAdminNotification(
     case 'user_report':
       text = [
         '<b>⚠️ Скарга на спам</b>\n',
-        `📢 <b>Поскаржився:</b> ${esc(data.reporterLabel)} ${data.reporterUsername ? `(@${esc(data.reporterUsername)})` : ''}`,
-        `💬 <b>Коментар:</b> ${esc(data.reporterMessage || '(порожньо)')}\n`,
-        `🎯 <b>Ціль:</b> ${esc(data.targetLabel)} ${data.targetUsername ? `(@${esc(data.targetUsername)})` : ''}`,
-        `📝 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+        `<b>Поскаржився:</b> ${esc(data.reporterLabel)} ${data.reporterUsername ? `(@${esc(data.reporterUsername)})` : ''}`,
+        `<b>Коментар:</b> ${esc(data.reporterMessage || '(порожньо)')}\n`,
+        `<b>Ціль:</b> ${esc(data.targetLabel)} ${data.targetUsername ? `(@${esc(data.targetUsername)})` : ''}`,
+        `<b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
       ].join('\n');
       if (data.quarantineId) {
         buttons = [[
@@ -728,8 +744,8 @@ function formatAdminNotification(
       text = [
         '<b>⏳ Новий пункт у черзі перевірки</b>\n',
         userPart,
-        `🔍 <b>Збіг:</b> ${esc(data.matchedTerms?.join(', ') || 'немає')}`,
-        `💬 <b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
+        `<b>Збіг:</b> ${esc(data.matchedTerms?.join(', ') || 'немає')}`,
+        `<b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
       ].join('\n');
       if (data.quarantineId) {
         buttons = [[
