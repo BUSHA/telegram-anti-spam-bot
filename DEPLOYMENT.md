@@ -57,20 +57,10 @@ database_id = "ВСТАВТЕ_ВАШ_DATABASE_ID_ТУТ"
 
 ## 5. Запуск першої міграції
 
-### Рекомендований спосіб (через Wrangler):
-
 ```bash
-npx wrangler d1 execute telegram_antispam --remote --file=schema.sql
+npx wrangler d1 migrations apply telegram_antispam --remote
 ```
 
-### Альтернативний спосіб (через Cloudflare API та curl):
-
-```bash
-curl -X POST "https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/d1/database/<DATABASE_ID>/query" \
-  -H "Authorization: Bearer <CF_API_TOKEN>" \
-  -H "Content-Type: application/json" \
-  --data-binary @<(jq -n --arg sql "$(cat schema.sql)" '{sql: [$sql]}')
-```
 
 ## 6. Створення черги (Queue)
 
@@ -302,10 +292,8 @@ database_id = "PASTE_REAL_DATABASE_ID_HERE"
 
 ## 5. Run First Migration
 
-### Recommended (Wrangler local schema file execution)
-
 ```bash
-npx wrangler d1 execute telegram_antispam --remote --file=schema.sql
+npx wrangler d1 migrations telegram_antispam --remote
 ```
 
 ## 6. Create Delay Queue

@@ -172,8 +172,6 @@ const RUNTIME_SETTINGS_CACHE: {
   value: null
 };
 
-let schemaEnsuredPromise: Promise<void> | null = null;
-
 const HOMOGLYPHS: Record<string, string> = {
   a: 'а',
   c: 'с',
@@ -278,190 +276,9 @@ function pagingMeta(total: number, page: number, pageSize: number) {
   };
 }
 
-async function ensureSchema(db: D1Database): Promise<void> {
-  if (!schemaEnsuredPromise) {
-    schemaEnsuredPromise = (async () => {
-      await db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-          )`
-        )
-        .run();
-
-      await db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS blacklist (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pattern TEXT NOT NULL,
-            is_regex INTEGER NOT NULL DEFAULT 0
-          )`
-        )
-        .run();
-
-      await db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS quarantine (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            reporter_user_id INTEGER,
-            reporter_username TEXT,
-            reporter_first_name TEXT,
-            reporter_last_name TEXT,
-            reporter_message TEXT,
-            text TEXT NOT NULL,
-            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            UNIQUE(message_id, user_id)
-          )`
-        )
-        .run();
-
-      await db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            action TEXT NOT NULL,
-            user_id INTEGER,
-            details TEXT,
-            meta_json TEXT,
-            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-          )`
-        )
-        .run();
-      await db
-        .prepare(
-          `CREATE TABLE IF NOT EXISTS premoderation_challenges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            join_message_id INTEGER,
-            captcha_message_id INTEGER,
-            challenge_token TEXT NOT NULL UNIQUE,
-            correct_digit INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            failure_reason TEXT,
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            expires_at TEXT NOT NULL,
-            resolved_at TEXT
-          )`
-        )
-        .run();
-
-      try {
-        await db.prepare('ALTER TABLE logs ADD COLUMN meta_json TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN first_name TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN last_name TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_user_id INTEGER').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_username TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_first_name TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_last_name TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-      try {
-        await db.prepare('ALTER TABLE quarantine ADD COLUMN reporter_message TEXT').run();
-      } catch {
-        // Column already exists.
-      }
-
-      await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC)').run();
-      await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)').run();
-      await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_expiry ON premoderation_challenges(status, expires_at)').run();
-      await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_user ON premoderation_challenges(chat_id, user_id, status)').run();
-
-      const existing = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('SOFT_SUSPICIOUS_KEYWORDS').first();
-      if (!existing) {
-        await db
-          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
-          .bind('SOFT_SUSPICIOUS_KEYWORDS', serializeSoftKeywords(DEFAULT_SOFT_SUSPICIOUS_KEYWORDS))
-          .run();
-      }
-
-      const safeModeSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('SAFE_MODE').first();
-      if (!safeModeSetting) {
-        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('SAFE_MODE', '0').run();
-      }
-
-      const webhookPathSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('WEBHOOK_PATH_TOKEN').first();
-      if (!webhookPathSetting) {
-        await db
-          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
-          .bind('WEBHOOK_PATH_TOKEN', crypto.randomUUID())
-          .run();
-      }
-
-      const adminUserIdSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('ADMIN_USER_ID').first();
-      if (!adminUserIdSetting) {
-        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('ADMIN_USER_ID', '').run();
-      }
-      const botUsernameSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('BOT_USERNAME').first();
-      if (!botUsernameSetting) {
-        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('BOT_USERNAME', '').run();
-      }
-      const premodEnabledSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('PREMODERATION_ENABLED').first();
-      if (!premodEnabledSetting) {
-        await db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').bind('PREMODERATION_ENABLED', '0').run();
-      }
-      const premodTimeoutSetting = await db
-        .prepare('SELECT value FROM settings WHERE key = ?')
-        .bind('PREMODERATION_TIMEOUT_SEC')
-        .first();
-      if (!premodTimeoutSetting) {
-        await db
-          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
-          .bind('PREMODERATION_TIMEOUT_SEC', String(DEFAULT_PREMODERATION_TIMEOUT_SEC))
-          .run();
-      }
-      const premodPromptSetting = await db.prepare('SELECT value FROM settings WHERE key = ?').bind('PREMODERATION_PROMPT').first();
-      if (!premodPromptSetting) {
-        await db
-          .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
-          .bind('PREMODERATION_PROMPT', DEFAULT_PREMODERATION_PROMPT)
-          .run();
-      }
-    })().catch((err) => {
-      schemaEnsuredPromise = null;
-      throw err;
-    });
-  }
-  await schemaEnsuredPromise;
-}
-
-async function getSetting(db: D1Database, key: string): Promise<string | null> {
+async function getSetting(db: D1Database, key: string, fallback: string): Promise<string> {
   const row = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
-  return row?.value ?? null;
+  return row?.value ?? fallback;
 }
 
 async function setSetting(db: D1Database, key: string, value: string): Promise<void> {
@@ -1342,13 +1159,13 @@ async function upsertCoreSettings(
   const botUsername = await getBotUsername(token);
   await setSetting(db, 'BOT_USERNAME', botUsername);
 
-  let secret = await getSetting(db, 'WEBHOOK_SECRET');
+  let secret = await getSetting(db, 'WEBHOOK_SECRET', '');
   if (!secret) {
     secret = crypto.randomUUID();
     await setSetting(db, 'WEBHOOK_SECRET', secret);
   }
 
-  let webhookPathToken = await getSetting(db, 'WEBHOOK_PATH_TOKEN');
+  let webhookPathToken = await getSetting(db, 'WEBHOOK_PATH_TOKEN', '');
   if (!webhookPathToken) {
     webhookPathToken = crypto.randomUUID();
     await setSetting(db, 'WEBHOOK_PATH_TOKEN', webhookPathToken);
@@ -1470,11 +1287,6 @@ async function unbanFromLogById(
 function jsonError(message: string, status = 400) {
   return Response.json({ ok: false, error: message }, { status });
 }
-
-app.use('*', async (c, next) => {
-  await ensureSchema(c.env.DB);
-  await next();
-});
 
 app.onError((err, c) => {
   console.error(err);
@@ -1919,6 +1731,10 @@ app.post('/webhook/:pathToken', async (c) => {
 
 app.post('/webhook', (c) => jsonError('not_found', 404));
 
+app.get('/admin', (c) => {
+  return c.redirect('/admin/');
+});
+
 app.get('/admin/', async (c) => {
   await purgeOldLogs(c.env.DB);
   return c.html(ADMIN_HTML);
@@ -1926,20 +1742,20 @@ app.get('/admin/', async (c) => {
 
 app.get('/admin/api/settings', async (c) => {
   const db = c.env.DB;
-  const token = await getSetting(db, 'TELEGRAM_TOKEN');
-  const chatId = await getSetting(db, 'CHAT_ID');
-  const workerUrl = await getSetting(db, 'WORKER_URL');
-  const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS'));
-  const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
-  const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
-  const adminUserId = (await getSetting(db, 'ADMIN_USER_ID')) ?? '';
-  const premoderationEnabled = (await getSetting(db, 'PREMODERATION_ENABLED')) === '1';
-  const timeoutRaw = Number((await getSetting(db, 'PREMODERATION_TIMEOUT_SEC')) ?? '');
+  const token = await getSetting(db, 'TELEGRAM_TOKEN', '');
+  const chatId = await getSetting(db, 'CHAT_ID', '');
+  const workerUrl = await getSetting(db, 'WORKER_URL', '');
+  const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS', ''));
+  const safeMode = (await getSetting(db, 'SAFE_MODE', '0')) === '1';
+  const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN', ''));
+  const adminUserId = (await getSetting(db, 'ADMIN_USER_ID', '')) ?? '';
+  const premoderationEnabled = (await getSetting(db, 'PREMODERATION_ENABLED', '0')) === '1';
+  const timeoutRaw = Number((await getSetting(db, 'PREMODERATION_TIMEOUT_SEC', String(DEFAULT_PREMODERATION_TIMEOUT_SEC))));
   const premoderationTimeoutSec =
     Number.isFinite(timeoutRaw) && timeoutRaw > 0
       ? Math.max(10, Math.min(300, Math.floor(timeoutRaw)))
       : DEFAULT_PREMODERATION_TIMEOUT_SEC;
-  const premoderationPrompt = (await getSetting(db, 'PREMODERATION_PROMPT')) || DEFAULT_PREMODERATION_PROMPT;
+  const premoderationPrompt = await getSetting(db, 'PREMODERATION_PROMPT',  DEFAULT_PREMODERATION_PROMPT);
   return c.json({
     ok: true,
     data: {
@@ -2145,11 +1961,6 @@ app.post('/admin/api/logs/:id/unban', async (c) => {
   const result = await unbanFromLogById(c.env.DB, settings, id, 'dashboard');
   if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
   return c.json({ ok: true });
-});
-
-app.get('/admin', async (c) => {
-  await purgeOldLogs(c.env.DB);
-  return c.html(ADMIN_HTML);
 });
 
 export default {
