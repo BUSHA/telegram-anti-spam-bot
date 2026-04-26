@@ -20,3 +20,6 @@ queue = "anti-spam-delay-queue"
 max_batch_size = 10
 max_batch_timeout = 0
 max_retries = 0
+
+[triggers]
+crons = ["0 */8 * * *"] # every eight hours
