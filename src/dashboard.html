@@ -194,20 +194,19 @@
               <div class="space-y-4 mb-6">
                 <div>
                   <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Токен бота</label>
-                  <input id="token" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
-                  <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/BotFather" target="_blank" class="text-blue-400 hover:text-blue-300">@BotFather</a></p>
+                  <input id="token" type="password" autocomplete="new-password" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="Залиште порожнім, щоб не змінювати збережений токен" />
+                  <p id="tokenStatus" class="text-[11px] text-slate-500 mt-1">Токен не показується в інтерфейсі. Нове значення можна ввести для заміни.</p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">ID цільового чату</label>
-                    <input id="chatId" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="-1001234567890" />
-                    <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/getidsbot" target="_blank" class="text-blue-400 hover:text-blue-300">@getidsbot</a></p>
+                <div>
+                  <div class="flex items-center justify-between gap-3 mb-3">
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Чати та адміни</label>
+                    <button id="addAssignmentRow" type="button" class="btn px-3 py-1.5 bg-slate-700/80 hover:bg-slate-700 text-slate-100 rounded-lg border border-slate-600 text-xs">
+                      <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m7-7H5"></path></svg>
+                      Додати пару
+                    </button>
                   </div>
-                  <div>
-                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">ID адміністратора</label>
-                    <input id="adminUserId" class="input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456789" />
-                    <p class="text-[11px] text-slate-500 mt-1">Отримайте його у <a href="https://t.me/userinfobot" target="_blank" class="text-blue-400 hover:text-blue-300">@userinfobot</a></p>
-                  </div>
+                  <div id="assignmentRows" class="space-y-3"></div>
+                  <p class="text-[11px] text-slate-500 mt-2">Вкажіть ID чату та один або кілька ID адмінів через кому. Назви підтягнуться з Telegram після збереження.</p>
                 </div>
                 
                 <div class="pt-2">
@@ -447,6 +446,54 @@
         try { return JSON.parse(metaJson); } catch { return null; }
       }
 
+      function chatBadge(chatTitle, chatId) {
+        const label = chatTitle || chatId || '';
+        if (!label) return '';
+        return '<span class="inline-flex items-center px-2 py-0.5 rounded border border-sky-500/25 bg-sky-500/10 text-sky-300 text-[10px] font-semibold">' + esc(label) + '</span>';
+      }
+
+      function assignmentRowTemplate(row = {}) {
+        const div = document.createElement('div');
+        div.className = 'assignment-row grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end bg-slate-900/35 border border-slate-700/50 rounded-xl p-3';
+        div.innerHTML =
+          '<div>' +
+            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Chat ID</label>' +
+            '<input class="assignment-chat input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="-1001234567890" value="' + esc(row.chatId || '') + '" />' +
+            '<div class="assignment-chat-title min-h-[1rem] text-[11px] text-sky-300 mt-1 truncate">' + esc(row.chatTitle || '') + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Admin ID / IDs</label>' +
+            '<input class="assignment-admins input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456789, 987654321" value="' + esc(row.adminIds || '') + '" />' +
+            '<div class="assignment-admin-labels min-h-[1rem] text-[11px] text-emerald-300 mt-1 truncate">' + esc(row.adminLabels || '') + '</div>' +
+          '</div>' +
+          '<button type="button" class="assignment-remove btn px-3 py-3 bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 rounded-lg border border-slate-700 hover:border-rose-500/40" title="Видалити">' +
+            '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
+          '</button>';
+        div.querySelector('.assignment-remove').addEventListener('click', () => {
+          div.remove();
+          if (!$('assignmentRows').querySelector('.assignment-row')) addAssignmentRow();
+        });
+        return div;
+      }
+
+      function addAssignmentRow(row = {}) {
+        $('assignmentRows').appendChild(assignmentRowTemplate(row));
+      }
+
+      function renderAssignmentRows(rows) {
+        const root = $('assignmentRows');
+        root.innerHTML = '';
+        const list = rows && rows.length ? rows : [{}];
+        list.forEach(addAssignmentRow);
+      }
+
+      function readAssignmentRows() {
+        return Array.from(document.querySelectorAll('.assignment-row')).map(row => ({
+          chatId: row.querySelector('.assignment-chat').value,
+          adminIds: row.querySelector('.assignment-admins').value
+        })).filter(row => row.chatId.trim() || row.adminIds.trim());
+      }
+
       function highlightText(text, terms) {
         let highlighted = esc(text);
         if (!terms || !terms.length) return highlighted;
@@ -480,9 +527,9 @@
 
       async function loadSettings() {
         const data = await api('/admin/api/settings');
-        $('token').value = data.data.token || '';
-        $('chatId').value = data.data.chatId || '';
-        $('adminUserId').value = data.data.adminUserId || '';
+        $('token').value = '';
+        $('tokenStatus').textContent = data.data.tokenConfigured ? 'Токен збережено. Він не показується в інтерфейсі.' : 'Токен ще не збережено.';
+        renderAssignmentRows(data.data.assignments || []);
         $('softKeywords').value = (data.data.softKeywords || []).join('\n');
         $('safeMode').checked = !!data.data.safeMode;
         $('premoderationEnabled').checked = !!data.data.premoderationEnabled;
@@ -496,11 +543,13 @@
         const data = await api('/admin/api/settings', {
           method: 'POST', body: JSON.stringify({ 
             token: $('token').value, 
-            chatId: $('chatId').value, 
-            adminUserId: $('adminUserId').value,
+            assignments: readAssignmentRows(),
             safeMode: $('safeMode').checked
           })
         });
+        $('token').value = '';
+        $('tokenStatus').textContent = data.data.tokenConfigured ? 'Токен збережено. Він не показується в інтерфейсі.' : 'Токен ще не збережено.';
+        renderAssignmentRows(data.data.assignments || []);
         if (data.data && data.data.webhookPath) $('webhookPathInfo').textContent = 'Вебхук активний: ' + data.data.webhookPath;
         $('safeModeBadge').classList.toggle('hidden', !$('safeMode').checked);
       }
@@ -584,6 +633,7 @@
           const namePart = fullName ? ' <span class="text-slate-300">' + esc(fullName) + '</span>' : '';
           const usernamePart = row.username ? ' <span class="text-blue-300">@' + esc(row.username) + '</span>' : '';
           const reporterName = [row.reporter_first_name, row.reporter_last_name].filter(Boolean).join(' ');
+          const chatHtml = chatBadge(row.chat_title, row.chat_id);
           
           let reporterHtml = '';
           if (row.reporter_user_id) {
@@ -593,8 +643,8 @@
           const el = rowCard(
             '<div class="flex flex-col gap-3">' +
               '<div class="flex justify-between items-start">' +
-                '<div class="text-sm font-medium text-slate-400 flex items-center flex-wrap gap-x-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>' +
-                'ID: ' + row.user_id + usernamePart + namePart +
+                '<div class="text-sm font-medium text-slate-400 flex items-center flex-wrap gap-2"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>' +
+                chatHtml + '<span>ID: ' + row.user_id + usernamePart + namePart + '</span>' +
                 '</div>' +
                 '<div class="text-xs text-slate-500 bg-slate-800 px-2 py-0.5 rounded font-mono">ПОВ ' + row.message_id + '</div>' +
               '</div>' +
@@ -699,6 +749,7 @@
           const userName = [meta?.user?.firstName, meta?.user?.lastName].filter(Boolean).join(' ');
           const userLine = meta?.user
             ? '<div class="text-slate-300 flex items-center gap-2"><svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg><span class="font-medium">' + esc(userName || String(meta.user.id)) + '</span>' + (meta.user.username ? ' <span class="text-blue-300">@' + esc(meta.user.username) + '</span>' : '') + '</div>' : '';
+          const chatLine = chatBadge(meta?.chatTitle || row.chat_title, meta?.chatId || row.chat_id);
             
           const reporterName = [meta?.reporter?.firstName, meta?.reporter?.lastName].filter(Boolean).join(' ');
           const reporterLine = meta?.reporter
@@ -722,8 +773,9 @@
           const el = rowCard(
             '<div class="flex flex-col gap-2">' +
               '<div class="flex items-start justify-between gap-3">' +
-                '<div class="flex items-center gap-2">' +
+                '<div class="flex items-center gap-2 flex-wrap">' +
                   '<span class="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ' + actionColor(row.action) + '">' + esc(actionTitle(row.action)) + '</span>' +
+                  chatLine +
                 '</div>' +
                 '<div class="text-xs text-slate-400 whitespace-nowrap">' + timeStr + '</div>' +
               '</div>' +
@@ -787,6 +839,7 @@
       }
 
       $('saveSettings').addEventListener('click', () => saveSettings().then(() => showToast('Налаштування збережено')).catch(e => showToast(e.message, 'error')));
+      $('addAssignmentRow').addEventListener('click', () => addAssignmentRow());
       $('saveModeration').addEventListener('click', () => saveModeration().then(() => showToast('Налаштування модерації збережено')).catch(e => showToast(e.message, 'error')));
       $('savePremoderation').addEventListener('click', () => savePremoderation().then(() => showToast('Налаштування капчі збережено')).catch(e => showToast(e.message, 'error')));
       $('saveBlacklist').addEventListener('click', () => saveBlacklist().then(() => showToast('Чорний список збережено')).catch(e => showToast(e.message, 'error')));

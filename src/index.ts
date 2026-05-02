@@ -76,20 +76,43 @@ type LogMeta = {
     lastName?: string;
   };
   reporterMessage?: string;
+  chatTitle?: string;
+};
+
+type ManagedChat = {
+  chatId: string;
+  title: string;
+};
+
+type ManagedAdmin = {
+  userId: string;
+  label: string;
+  chatIds: string[];
+};
+
+type AssignmentInput = {
+  chatId?: string;
+  adminIds?: string[] | string;
 };
 
 type RuntimeSettings = {
   token: string;
-  chatId: string;
   secret: string;
   softKeywords: string[];
   safeMode: boolean;
   webhookPathToken: string;
-  adminUserId: string;
   botUsername: string;
   premoderationEnabled: boolean;
   premoderationTimeoutSec: number;
   premoderationPrompt: string;
+  chats: ManagedChat[];
+  admins: ManagedAdmin[];
+};
+
+type ActiveChatSettings = RuntimeSettings & {
+  chatId: string;
+  chatTitle: string;
+  assignedAdminIds: string[];
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -292,6 +315,43 @@ async function ensureSchema(db: D1Database): Promise<void> {
 
       await db
         .prepare(
+          `CREATE TABLE IF NOT EXISTS bot_chats (
+            chat_id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          )`
+        )
+        .run();
+
+      await db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS bot_admins (
+            user_id TEXT PRIMARY KEY,
+            label TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          )`
+        )
+        .run();
+
+      await db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS admin_chat_assignments (
+            admin_user_id TEXT NOT NULL,
+            chat_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            PRIMARY KEY(admin_user_id, chat_id),
+            FOREIGN KEY(admin_user_id) REFERENCES bot_admins(user_id) ON DELETE CASCADE,
+            FOREIGN KEY(chat_id) REFERENCES bot_chats(chat_id) ON DELETE CASCADE
+          )`
+        )
+        .run();
+
+      await db
+        .prepare(
           `CREATE TABLE IF NOT EXISTS blacklist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pattern TEXT NOT NULL,
@@ -304,6 +364,8 @@ async function ensureSchema(db: D1Database): Promise<void> {
         .prepare(
           `CREATE TABLE IF NOT EXISTS quarantine (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT NOT NULL DEFAULT '',
+            chat_title TEXT NOT NULL DEFAULT '',
             message_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
             username TEXT,
@@ -316,7 +378,7 @@ async function ensureSchema(db: D1Database): Promise<void> {
             reporter_message TEXT,
             text TEXT NOT NULL,
             timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            UNIQUE(message_id, user_id)
+            UNIQUE(chat_id, message_id, user_id)
           )`
         )
         .run();
@@ -327,6 +389,8 @@ async function ensureSchema(db: D1Database): Promise<void> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             action TEXT NOT NULL,
             user_id INTEGER,
+            chat_id TEXT,
+            chat_title TEXT,
             details TEXT,
             meta_json TEXT,
             timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -357,6 +421,26 @@ async function ensureSchema(db: D1Database): Promise<void> {
 
       try {
         await db.prepare('ALTER TABLE logs ADD COLUMN meta_json TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE logs ADD COLUMN chat_id TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare('ALTER TABLE logs ADD COLUMN chat_title TEXT').run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare("ALTER TABLE quarantine ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''").run();
+      } catch {
+        // Column already exists.
+      }
+      try {
+        await db.prepare("ALTER TABLE quarantine ADD COLUMN chat_title TEXT NOT NULL DEFAULT ''").run();
       } catch {
         // Column already exists.
       }
@@ -396,8 +480,47 @@ async function ensureSchema(db: D1Database): Promise<void> {
         // Column already exists.
       }
 
+      const quarantineUniqueMigration = await db
+        .prepare('SELECT value FROM settings WHERE key = ?')
+        .bind('QUARANTINE_CHAT_UNIQUE_MIGRATED')
+        .first<{ value: string }>();
+      if (!quarantineUniqueMigration) {
+        const quarantineCount = (await db.prepare('SELECT COUNT(*) AS total FROM quarantine').first<{ total: number }>())?.total ?? 0;
+        if (quarantineCount === 0) {
+          await db.prepare('DROP TABLE quarantine').run();
+          await db
+            .prepare(
+              `CREATE TABLE quarantine (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL DEFAULT '',
+                chat_title TEXT NOT NULL DEFAULT '',
+                message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                reporter_user_id INTEGER,
+                reporter_username TEXT,
+                reporter_first_name TEXT,
+                reporter_last_name TEXT,
+                reporter_message TEXT,
+                text TEXT NOT NULL,
+                timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                UNIQUE(chat_id, message_id, user_id)
+              )`
+            )
+            .run();
+          await db
+            .prepare('INSERT INTO settings(key, value) VALUES(?, ?)')
+            .bind('QUARANTINE_CHAT_UNIQUE_MIGRATED', '1')
+            .run();
+        }
+      }
+
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_timestamp ON quarantine(timestamp DESC)').run();
+      await db.prepare('CREATE INDEX IF NOT EXISTS idx_quarantine_chat_timestamp ON quarantine(chat_id, timestamp DESC)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC)').run();
+      await db.prepare('CREATE INDEX IF NOT EXISTS idx_logs_chat_timestamp ON logs(chat_id, timestamp DESC)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_expiry ON premoderation_challenges(status, expires_at)').run();
       await db.prepare('CREATE INDEX IF NOT EXISTS idx_premod_user ON premoderation_challenges(chat_id, user_id, status)').run();
 
@@ -451,6 +574,48 @@ async function ensureSchema(db: D1Database): Promise<void> {
           .bind('PREMODERATION_PROMPT', DEFAULT_PREMODERATION_PROMPT)
           .run();
       }
+
+      const existingChatCount = (await db.prepare('SELECT COUNT(*) AS total FROM bot_chats').first<{ total: number }>())?.total ?? 0;
+      const legacyChatId = existingChatCount === 0
+        ? ((await db.prepare('SELECT value FROM settings WHERE key = ?').bind('CHAT_ID').first<{ value: string }>())?.value ?? '').trim()
+        : '';
+      if (legacyChatId) {
+        await db
+          .prepare(
+            `INSERT INTO bot_chats(chat_id, title, enabled, updated_at)
+             VALUES(?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(chat_id) DO NOTHING`
+          )
+          .bind(legacyChatId, legacyChatId)
+          .run();
+        await db.prepare('UPDATE quarantine SET chat_id = ? WHERE chat_id = ""').bind(legacyChatId).run();
+        await db.prepare('UPDATE logs SET chat_id = ? WHERE chat_id IS NULL OR chat_id = ""').bind(legacyChatId).run();
+        await db.prepare('UPDATE quarantine SET chat_title = ? WHERE chat_title = ""').bind(legacyChatId).run();
+        await db.prepare('UPDATE logs SET chat_title = ? WHERE chat_title IS NULL OR chat_title = ""').bind(legacyChatId).run();
+      }
+
+      const legacyAdminIds = legacyChatId
+        ? ((await db.prepare('SELECT value FROM settings WHERE key = ?').bind('ADMIN_USER_ID').first<{ value: string }>())?.value ?? '')
+            .split(/[\s,;]+/u)
+            .map((id) => id.trim())
+            .filter((id) => /^\d+$/u.test(id))
+        : [];
+      for (const adminId of legacyAdminIds) {
+        await db
+          .prepare(
+            `INSERT INTO bot_admins(user_id, label, enabled, updated_at)
+             VALUES(?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(user_id) DO NOTHING`
+          )
+          .bind(adminId, adminId)
+          .run();
+        if (legacyChatId) {
+          await db
+            .prepare('INSERT OR IGNORE INTO admin_chat_assignments(admin_user_id, chat_id) VALUES(?, ?)')
+            .bind(adminId, legacyChatId)
+            .run();
+        }
+      }
     })().catch((err) => {
       schemaEnsuredPromise = null;
       throw err;
@@ -480,8 +645,8 @@ async function logAction(
   meta: LogMeta | null = null
 ): Promise<number | null> {
   const result = await db
-    .prepare('INSERT INTO logs(action, user_id, details, meta_json) VALUES(?, ?, ?, ?)')
-    .bind(action, userId, details, meta ? JSON.stringify(meta) : null)
+    .prepare('INSERT INTO logs(action, user_id, chat_id, chat_title, details, meta_json) VALUES(?, ?, ?, ?, ?, ?)')
+    .bind(action, userId, meta?.chatId ?? null, meta?.chatTitle ?? null, details, meta ? JSON.stringify(meta) : null)
     .run();
   const raw = (result as { meta?: { last_row_id?: number } }).meta?.last_row_id;
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
@@ -511,6 +676,34 @@ async function setWebhook(token: string, url: string, secret: string): Promise<T
 async function getBotUsername(token: string): Promise<string> {
   const res = await telegramApi<{ username?: string }>(token, 'getMe', {});
   return (res.result?.username ?? '').trim().toLowerCase();
+}
+
+async function getTelegramChatTitle(token: string, chatId: string): Promise<string> {
+  try {
+    const res = await telegramApi<{ title?: string; username?: string; first_name?: string; last_name?: string }>(token, 'getChat', {
+      chat_id: chatId
+    });
+    if (!res.ok || !res.result) return chatId;
+    const chat = res.result;
+    return chat.title || chat.username || `${chat.first_name ?? ''} ${chat.last_name ?? ''}`.trim() || chatId;
+  } catch {
+    return chatId;
+  }
+}
+
+async function getTelegramUserLabel(token: string, chatId: string, userId: string): Promise<string> {
+  try {
+    const res = await telegramApi<{ user?: { username?: string; first_name?: string; last_name?: string } }>(
+      token,
+      'getChatMember',
+      { chat_id: chatId, user_id: Number(userId) }
+    );
+    if (!res.ok || !res.result?.user) return userId;
+    const user = res.result.user;
+    return user.username ? `@${user.username}` : `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || userId;
+  } catch {
+    return userId;
+  }
 }
 
 async function answerCallbackQuery(token: string, callbackQueryId: string, text: string): Promise<void> {
@@ -543,6 +736,10 @@ async function sendAdminMessage(
   } catch {
     // Ignore admin notification delivery failures.
   }
+}
+
+function getAdminChatCount(settings: RuntimeSettings, adminUserId: string): number {
+  return settings.admins.find((admin) => admin.userId === adminUserId)?.chatIds.length ?? 0;
 }
 
 async function editMessageText(
@@ -696,17 +893,21 @@ function formatAdminNotification(
     reporterMessage?: string | null;
     targetLabel?: string;
     targetUsername?: string | null;
+    chatTitle?: string | null;
+    includeChatName?: boolean;
   }
 ): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
   let text = '';
   let buttons: Array<Array<{ text: string; callback_data: string }>> = [];
 
   const userPart = `<b>Користувач:</b> ${esc(data.userLabel)} ${data.username ? `(@${esc(data.username)})` : ''}`;
+  const chatPart = data.includeChatName && data.chatTitle ? [`<b>Чат:</b> ${esc(data.chatTitle)}`] : [];
 
   switch (type) {
     case 'premod_failure':
       text = [
         '<b>❌ Пре-модерацію провалено</b>\n',
+        ...chatPart,
         userPart,
         `<b>Причина:</b> ${esc(data.reasonText)}`,
         `<b>Статус бану:</b> ${data.banStatusText}`
@@ -717,6 +918,7 @@ function formatAdminNotification(
     case 'hard_match':
       text = [
         '<b>🚫 Бан за чорним списком</b>\n',
+        ...chatPart,
         userPart,
         `<b>Збіг:</b> ${esc(data.matchedTerms?.join(', '))}`,
         `<b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
@@ -727,6 +929,7 @@ function formatAdminNotification(
     case 'user_report':
       text = [
         '<b>⚠️ Скарга на спам</b>\n',
+        ...chatPart,
         `<b>Поскаржився:</b> ${esc(data.reporterLabel)} ${data.reporterUsername ? `(@${esc(data.reporterUsername)})` : ''}`,
         `<b>Коментар:</b> ${esc(data.reporterMessage || '(порожньо)')}\n`,
         `<b>Ціль:</b> ${esc(data.targetLabel)} ${data.targetUsername ? `(@${esc(data.targetUsername)})` : ''}`,
@@ -743,6 +946,7 @@ function formatAdminNotification(
     case 'soft_match':
       text = [
         '<b>⏳ Новий пункт у черзі перевірки</b>\n',
+        ...chatPart,
         userPart,
         `<b>Збіг:</b> ${esc(data.matchedTerms?.join(', ') || 'немає')}`,
         `<b>Повідомлення:</b>\n<pre>${esc(data.text)}</pre>`
@@ -953,7 +1157,7 @@ function userLabelFromRow(row: PremodChallengeRow): string {
 
 async function resolvePremoderationFailure(
   db: D1Database,
-  settings: RuntimeSettings,
+  settings: ActiveChatSettings,
   row: PremodChallengeRow,
   reason: 'timeout' | 'wrong_digit' | 'expired_click',
   selectedDigit?: number
@@ -991,10 +1195,11 @@ async function resolvePremoderationFailure(
         lastName: row.last_name ?? undefined
       },
       source: 'premoderation',
-      chatId: row.chat_id
+      chatId: row.chat_id,
+      chatTitle: settings.chatTitle
     }
   );
-  if (settings.adminUserId) {
+  if (settings.assignedAdminIds.length > 0) {
     const reasonText =
       reason === 'timeout'
         ? 'час вичерпано'
@@ -1002,20 +1207,23 @@ async function resolvePremoderationFailure(
           ? `невірна відповідь${typeof selectedDigit === 'number' ? ` (${selectedDigit} замість ${row.correct_digit})` : ''}`
           : 'застарілий клік';
 
-    const { text, buttons } = formatAdminNotification('premod_failure', {
-      userLabel,
-      username: row.username,
-      reasonText,
-      banStatusText: banRes.ok ? '✅ успішно' : `❌ помилка${banRes.description ? ` (${banRes.description})` : ''}`,
-      logId
+    await sendAssignedAdminNotifications(settings, (includeChatName) => {
+      return formatAdminNotification('premod_failure', {
+        userLabel,
+        username: row.username,
+        reasonText,
+        banStatusText: banRes.ok ? '✅ успішно' : `❌ помилка${banRes.description ? ` (${banRes.description})` : ''}`,
+        logId,
+        chatTitle: settings.chatTitle,
+        includeChatName
+      });
     });
-    await sendAdminMessage(settings.token, settings.adminUserId, text, buttons);
   }
 }
 
 async function resolvePremoderationSuccess(
   db: D1Database,
-  settings: RuntimeSettings,
+  settings: ActiveChatSettings,
   row: PremodChallengeRow
 ): Promise<{ ok: boolean; error?: string }> {
   if (row.status !== 'pending') return { ok: false, error: 'already processed' };
@@ -1052,13 +1260,14 @@ async function resolvePremoderationSuccess(
         lastName: row.last_name ?? undefined
       },
       source: 'premoderation',
-      chatId: row.chat_id
+      chatId: row.chat_id,
+      chatTitle: settings.chatTitle
     }
   );
   return { ok: true };
 }
 
-async function processExpiredPremoderationChallenges(db: D1Database, settings: RuntimeSettings): Promise<void> {
+async function processExpiredPremoderationChallenges(db: D1Database, settings: ActiveChatSettings): Promise<void> {
   if (!settings.premoderationEnabled) return;
   const rows = await db
     .prepare(
@@ -1121,7 +1330,7 @@ async function startPremoderationForUser(
   env: Env,
   ctx: any,
   db: D1Database,
-  settings: RuntimeSettings,
+  settings: ActiveChatSettings,
   user: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean },
   joinMessageId?: number
 ): Promise<{ ok: boolean; skipped?: string; error?: string }> {
@@ -1238,6 +1447,7 @@ async function startPremoderationForUser(
       },
       source: 'premoderation',
       chatId: settings.chatId,
+      chatTitle: settings.chatTitle,
       messageId: sendRes.result.message_id
     }
   );
@@ -1252,15 +1462,13 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(
       'TELEGRAM_TOKEN',
-      'CHAT_ID',
       'WEBHOOK_SECRET',
       'SOFT_SUSPICIOUS_KEYWORDS',
       'SAFE_MODE',
       'WEBHOOK_PATH_TOKEN',
-      'ADMIN_USER_ID',
       'BOT_USERNAME',
       'PREMODERATION_ENABLED',
       'PREMODERATION_TIMEOUT_SEC',
@@ -1272,12 +1480,10 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   for (const row of rows.results ?? []) map.set(row.key, row.value);
 
   const token = (map.get('TELEGRAM_TOKEN') ?? '').trim();
-  const chatId = (map.get('CHAT_ID') ?? '').trim();
   const secret = (map.get('WEBHOOK_SECRET') ?? '').trim();
   const softKeywords = parseSoftKeywords(map.get('SOFT_SUSPICIOUS_KEYWORDS') ?? null);
   const safeMode = (map.get('SAFE_MODE') ?? '0').trim() === '1';
   const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
-  const adminUserId = (map.get('ADMIN_USER_ID') ?? '').trim();
   const botUsername = (map.get('BOT_USERNAME') ?? '').trim().toLowerCase();
   const premoderationEnabled = (map.get('PREMODERATION_ENABLED') ?? '0').trim() === '1';
   const premoderationTimeoutSecRaw = Number((map.get('PREMODERATION_TIMEOUT_SEC') ?? '').trim());
@@ -1287,7 +1493,32 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
       : DEFAULT_PREMODERATION_TIMEOUT_SEC;
   const premoderationPrompt = (map.get('PREMODERATION_PROMPT') ?? '').trim() || DEFAULT_PREMODERATION_PROMPT;
 
-  if (!token || !chatId || !secret || !webhookPathToken) {
+  const chatRows = await db
+    .prepare('SELECT chat_id, title FROM bot_chats WHERE enabled = 1 ORDER BY title COLLATE NOCASE, chat_id')
+    .all<{ chat_id: string; title: string }>();
+  const chats = (chatRows.results ?? []).map((row) => ({
+    chatId: row.chat_id,
+    title: row.title?.trim() || row.chat_id
+  }));
+
+  const adminRows = await db
+    .prepare(
+      `SELECT a.user_id, a.label, aca.chat_id
+       FROM bot_admins a
+       LEFT JOIN admin_chat_assignments aca ON aca.admin_user_id = a.user_id
+       WHERE a.enabled = 1
+       ORDER BY a.user_id, aca.chat_id`
+    )
+    .all<{ user_id: string; label: string; chat_id: string | null }>();
+  const adminMap = new Map<string, ManagedAdmin>();
+  for (const row of adminRows.results ?? []) {
+    const admin = adminMap.get(row.user_id) ?? { userId: row.user_id, label: row.label || row.user_id, chatIds: [] };
+    if (row.chat_id) admin.chatIds.push(row.chat_id);
+    adminMap.set(row.user_id, admin);
+  }
+  const admins = Array.from(adminMap.values());
+
+  if (!token || !secret || !webhookPathToken || chats.length === 0) {
     RUNTIME_SETTINGS_CACHE.value = null;
     RUNTIME_SETTINGS_CACHE.expiresAt = now + 30_000;
     return null;
@@ -1295,20 +1526,46 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
 
   const value: RuntimeSettings = {
     token,
-    chatId,
     secret,
     softKeywords,
     safeMode,
     webhookPathToken,
-    adminUserId,
     botUsername,
     premoderationEnabled,
     premoderationTimeoutSec,
-    premoderationPrompt
+    premoderationPrompt,
+    chats,
+    admins
   };
   RUNTIME_SETTINGS_CACHE.value = value;
   RUNTIME_SETTINGS_CACHE.expiresAt = now + 60_000;
   return value;
+}
+
+function getActiveChatSettings(settings: RuntimeSettings, chatId: string | number): ActiveChatSettings | null {
+  const normalizedChatId = String(chatId);
+  const chat = settings.chats.find((item) => item.chatId === normalizedChatId);
+  if (!chat) return null;
+  const assignedAdminIds = settings.admins
+    .filter((admin) => admin.chatIds.includes(normalizedChatId))
+    .map((admin) => admin.userId);
+  return {
+    ...settings,
+    chatId: chat.chatId,
+    chatTitle: chat.title || chat.chatId,
+    assignedAdminIds
+  };
+}
+
+async function sendAssignedAdminNotifications(
+  settings: ActiveChatSettings,
+  build: (includeChatName: boolean) => { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> }
+): Promise<void> {
+  for (const adminUserId of settings.assignedAdminIds) {
+    const includeChatName = getAdminChatCount(settings, adminUserId) > 1;
+    const { text, buttons } = build(includeChatName);
+    await sendAdminMessage(settings.token, adminUserId, text, buttons);
+  }
 }
 
 async function banAndDelete(
@@ -1334,11 +1591,9 @@ async function banAndDelete(
 async function upsertCoreSettings(
   db: D1Database,
   token: string,
-  chatId: string,
   workerUrl: string
 ): Promise<{ secret: string; webhook: TelegramResponse<boolean>; webhookPathToken: string }> {
   await setSetting(db, 'TELEGRAM_TOKEN', token);
-  await setSetting(db, 'CHAT_ID', chatId);
   const botUsername = await getBotUsername(token);
   await setSetting(db, 'BOT_USERNAME', botUsername);
 
@@ -1365,10 +1620,12 @@ async function banDeleteQuarantineById(
   id: number
 ): Promise<{ ok: boolean; error?: string }> {
   const row = await db
-    .prepare('SELECT id, message_id, user_id, username, first_name, last_name, text FROM quarantine WHERE id = ?')
+    .prepare('SELECT id, chat_id, chat_title, message_id, user_id, username, first_name, last_name, text FROM quarantine WHERE id = ?')
     .bind(id)
     .first<{
       id: number;
+      chat_id: string;
+      chat_title: string;
       message_id: number;
       user_id: number;
       username: string | null;
@@ -1377,6 +1634,8 @@ async function banDeleteQuarantineById(
       text: string;
     }>();
   if (!row) return { ok: false, error: 'not found' };
+  const activeSettings = getActiveChatSettings(settings, row.chat_id);
+  if (!activeSettings) return { ok: false, error: 'chat is not configured' };
 
   const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
   const details = `ручний бан за результатами перевірки користувача ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; текст: ${row.text}`;
@@ -1391,14 +1650,15 @@ async function banDeleteQuarantineById(
         lastName: row.last_name ?? undefined
       },
       messageId: row.message_id,
-      chatId: settings.chatId,
+      chatId: activeSettings.chatId,
+      chatTitle: activeSettings.chatTitle,
       source: 'manual_review_dry_run'
     });
     await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
     return { ok: true };
   }
 
-  await banAndDelete(db, settings.token, settings.chatId, row.message_id, row.user_id, 'manual_review', details, {
+  await banAndDelete(db, activeSettings.token, activeSettings.chatId, row.message_id, row.user_id, 'manual_review', details, {
     messageText: row.text,
     user: {
       id: row.user_id,
@@ -1407,17 +1667,21 @@ async function banDeleteQuarantineById(
       lastName: row.last_name ?? undefined
     },
     messageId: row.message_id,
-    chatId: settings.chatId
+    chatId: activeSettings.chatId,
+    chatTitle: activeSettings.chatTitle
   });
   await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
   return { ok: true };
 }
 
 async function approveQuarantineById(db: D1Database, id: number): Promise<{ ok: boolean; error?: string }> {
-  const existing = await db.prepare('SELECT id FROM quarantine WHERE id = ?').bind(id).first<{ id: number }>();
+  const existing = await db.prepare('SELECT id, chat_id, chat_title FROM quarantine WHERE id = ?').bind(id).first<{ id: number; chat_id: string | null; chat_title: string | null }>();
   if (!existing) return { ok: false, error: 'not found' };
   await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
-  await logAction(db, 'quarantine_approved', null, `схвалено пункт черги ${id}`);
+  await logAction(db, 'quarantine_approved', null, `схвалено пункт черги ${id}`, {
+    chatId: existing.chat_id ?? undefined,
+    chatTitle: existing.chat_title ?? undefined
+  });
   return { ok: true };
 }
 
@@ -1447,8 +1711,12 @@ async function unbanFromLogById(
   }
   if (meta.unbannedAt) return { ok: true };
 
+  const chatId = meta.chatId || '';
+  const activeSettings = getActiveChatSettings(settings, chatId);
+  if (!activeSettings) return { ok: false, error: 'chat is not configured' };
+
   const unbanRes = await telegramApi<boolean>(settings.token, 'unbanChatMember', {
-    chat_id: settings.chatId,
+    chat_id: activeSettings.chatId,
     user_id: userId,
     only_if_banned: true
   });
@@ -1469,6 +1737,134 @@ async function unbanFromLogById(
 
 function jsonError(message: string, status = 400) {
   return Response.json({ ok: false, error: message }, { status });
+}
+
+function parseChatLines(value: string): ManagedChat[] {
+  const chats: ManagedChat[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of value.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const [rawChatId, ...titleParts] = line.split('|');
+    const chatId = rawChatId.trim();
+    if (!/^-?\d+$/u.test(chatId) || seen.has(chatId)) continue;
+    const title = titleParts.join('|').trim() || chatId;
+    chats.push({ chatId, title });
+    seen.add(chatId);
+  }
+  return chats;
+}
+
+function parseAdminLines(value: string, validChatIds: Set<string>): ManagedAdmin[] {
+  const admins: ManagedAdmin[] = [];
+  const seen = new Set<string>();
+  for (const rawLine of value.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const [rawUserId, rawLabel, rawChatIds] = line.split('|');
+    const userId = (rawUserId ?? '').trim();
+    if (!/^\d+$/u.test(userId) || seen.has(userId)) continue;
+    const chatIds = (rawChatIds ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => validChatIds.has(id));
+    admins.push({ userId, label: (rawLabel ?? '').trim() || userId, chatIds: Array.from(new Set(chatIds)) });
+    seen.add(userId);
+  }
+  return admins;
+}
+
+function parseAssignmentRows(rows: AssignmentInput[]): Array<{ chatId: string; adminIds: string[] }> {
+  const byChat = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const chatId = String(row.chatId ?? '').trim();
+    if (!/^-?\d+$/u.test(chatId)) continue;
+    const rawAdminIds = Array.isArray(row.adminIds) ? row.adminIds.join(',') : String(row.adminIds ?? '');
+    const adminIds = rawAdminIds
+      .split(/[\s,;]+/u)
+      .map((id) => id.trim())
+      .filter((id) => /^\d+$/u.test(id));
+    if (adminIds.length === 0) continue;
+    const set = byChat.get(chatId) ?? new Set<string>();
+    for (const adminId of adminIds) set.add(adminId);
+    byChat.set(chatId, set);
+  }
+  return Array.from(byChat.entries()).map(([chatId, adminIds]) => ({ chatId, adminIds: Array.from(adminIds) }));
+}
+
+async function resolveAssignmentsFromTelegram(
+  token: string,
+  rows: Array<{ chatId: string; adminIds: string[] }>
+): Promise<{ chats: ManagedChat[]; admins: ManagedAdmin[] }> {
+  const chats: ManagedChat[] = [];
+  const adminMap = new Map<string, ManagedAdmin>();
+
+  for (const row of rows) {
+    const title = await getTelegramChatTitle(token, row.chatId);
+    chats.push({ chatId: row.chatId, title });
+    for (const adminId of row.adminIds) {
+      const existing = adminMap.get(adminId);
+      const label = existing?.label && existing.label !== adminId ? existing.label : await getTelegramUserLabel(token, row.chatId, adminId);
+      const admin = existing ?? { userId: adminId, label, chatIds: [] };
+      admin.label = label || admin.label || adminId;
+      if (!admin.chatIds.includes(row.chatId)) admin.chatIds.push(row.chatId);
+      adminMap.set(adminId, admin);
+    }
+  }
+
+  return { chats, admins: Array.from(adminMap.values()) };
+}
+
+function buildAssignmentRows(chats: ManagedChat[], admins: ManagedAdmin[]): Array<{ chatId: string; chatTitle: string; adminIds: string; adminLabels: string }> {
+  return chats.map((chat) => {
+    const assignedAdmins = admins.filter((admin) => admin.chatIds.includes(chat.chatId));
+    return {
+      chatId: chat.chatId,
+      chatTitle: chat.title,
+      adminIds: assignedAdmins.map((admin) => admin.userId).join(', '),
+      adminLabels: assignedAdmins.map((admin) => admin.label || admin.userId).join(', ')
+    };
+  });
+}
+
+async function replaceChatAdminConfig(db: D1Database, chats: ManagedChat[], admins: ManagedAdmin[]): Promise<void> {
+  const batch: D1PreparedStatement[] = [];
+  batch.push(db.prepare('DELETE FROM admin_chat_assignments'));
+  batch.push(db.prepare('DELETE FROM bot_admins'));
+  batch.push(db.prepare('DELETE FROM bot_chats'));
+  for (const chat of chats) {
+    batch.push(
+      db
+        .prepare(
+          `INSERT INTO bot_chats(chat_id, title, enabled, updated_at)
+           VALUES(?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+        )
+        .bind(chat.chatId, chat.title)
+    );
+  }
+  for (const admin of admins) {
+    batch.push(
+      db
+        .prepare(
+          `INSERT INTO bot_admins(user_id, label, enabled, updated_at)
+           VALUES(?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+        )
+        .bind(admin.userId, admin.label)
+    );
+    for (const chatId of admin.chatIds) {
+      batch.push(db.prepare('INSERT INTO admin_chat_assignments(admin_user_id, chat_id) VALUES(?, ?)').bind(admin.userId, chatId));
+    }
+  }
+  if (batch.length) await db.batch(batch);
+  RUNTIME_SETTINGS_CACHE.expiresAt = 0;
+}
+
+function serializeChatLines(chats: ManagedChat[]): string {
+  return chats.map((chat) => `${chat.chatId} | ${chat.title}`).join('\n');
+}
+
+function serializeAdminLines(admins: ManagedAdmin[]): string {
+  return admins.map((admin) => `${admin.userId} | ${admin.label} | ${admin.chatIds.join(',')}`).join('\n');
 }
 
 app.use('*', async (c, next) => {
@@ -1521,9 +1917,14 @@ app.post('/webhook/:pathToken', async (c) => {
         )
         .bind(challengeToken)
         .first<PremodChallengeRow>();
+      const chatSettings = row ? getActiveChatSettings(settings, row.chat_id) : null;
       if (!row) {
         await answerCallbackQuery(settings.token, callbackQuery.id, 'Ця перевірка вже неактуальна');
         return c.json({ ok: true, skipped: 'premod_not_found' });
+      }
+      if (!chatSettings) {
+        await answerCallbackQuery(settings.token, callbackQuery.id, 'Чат не налаштовано');
+        return c.json({ ok: true, skipped: 'premod_chat_not_configured' });
       }
       if (String(callbackQuery.from.id) !== String(row.user_id)) {
         await answerCallbackQuery(settings.token, callbackQuery.id, 'Ця перевірка не для вас');
@@ -1534,35 +1935,44 @@ app.post('/webhook/:pathToken', async (c) => {
         return c.json({ ok: true, skipped: 'premod_already_processed' });
       }
       if (row.expires_at <= new Date().toISOString()) {
-        await resolvePremoderationFailure(db, settings, row, 'expired_click', selectedDigit);
+        await resolvePremoderationFailure(db, chatSettings, row, 'expired_click', selectedDigit);
         if (row.captcha_message_id) {
-          await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+          await editMessageText(settings.token, chatSettings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
         }
         await answerCallbackQuery(settings.token, callbackQuery.id, 'Час вичерпано');
         return c.json({ ok: true, action: 'premod_failed_expired' });
       }
 
       if (selectedDigit !== row.correct_digit) {
-        await resolvePremoderationFailure(db, settings, row, 'wrong_digit', selectedDigit);
+        await resolvePremoderationFailure(db, chatSettings, row, 'wrong_digit', selectedDigit);
         if (row.captcha_message_id) {
-          await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Неправильна відповідь.', []);
+          await editMessageText(settings.token, chatSettings.chatId, row.captcha_message_id, '⛔ Неправильна відповідь.', []);
         }
         await answerCallbackQuery(settings.token, callbackQuery.id, 'Неправильно');
         return c.json({ ok: true, action: 'premod_failed_wrong' });
       }
 
-      const passResult = await resolvePremoderationSuccess(db, settings, row);
+      const passResult = await resolvePremoderationSuccess(db, chatSettings, row);
       await answerCallbackQuery(settings.token, callbackQuery.id, passResult.ok ? 'Перевірку пройдено' : passResult.error ?? 'failed');
       return c.json({ ok: passResult.ok, action: 'premod_pass', error: passResult.error });
     }
 
-    if (!settings.adminUserId || String(callbackQuery.from.id) !== String(settings.adminUserId)) {
+    const callbackAdminId = String(callbackQuery.from.id);
+    const hasAnyAssignment = settings.admins.some((admin) => admin.userId === callbackAdminId && admin.chatIds.length > 0);
+    if (!hasAnyAssignment) {
       await answerCallbackQuery(settings.token, callbackQuery.id, 'Тільки адмін може використовувати цю дію');
       return c.json({ ok: true, skipped: 'callback_not_admin' });
     }
 
     if (data.startsWith('qr_ban:')) {
       const id = Number(data.slice('qr_ban:'.length));
+      if (Number.isFinite(id)) {
+        const item = await db.prepare('SELECT chat_id FROM quarantine WHERE id = ?').bind(id).first<{ chat_id: string }>();
+        if (item && !settings.admins.some((admin) => admin.userId === callbackAdminId && admin.chatIds.includes(item.chat_id))) {
+          await answerCallbackQuery(settings.token, callbackQuery.id, 'Цей чат не призначений вам');
+          return c.json({ ok: true, skipped: 'callback_chat_not_assigned' });
+        }
+      }
       const result = Number.isFinite(id) ? await banDeleteQuarantineById(db, settings, id) : { ok: false, error: 'невірний id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Виконано' : result.error ?? 'помилка');
       await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? '✅ Забанено' : `❌ Помилка: ${result.error ?? 'помилка'}`);
@@ -1570,6 +1980,13 @@ app.post('/webhook/:pathToken', async (c) => {
     }
     if (data.startsWith('qr_app:')) {
       const id = Number(data.slice('qr_app:'.length));
+      if (Number.isFinite(id)) {
+        const item = await db.prepare('SELECT chat_id FROM quarantine WHERE id = ?').bind(id).first<{ chat_id: string }>();
+        if (item && !settings.admins.some((admin) => admin.userId === callbackAdminId && admin.chatIds.includes(item.chat_id))) {
+          await answerCallbackQuery(settings.token, callbackQuery.id, 'Цей чат не призначений вам');
+          return c.json({ ok: true, skipped: 'callback_chat_not_assigned' });
+        }
+      }
       const result = Number.isFinite(id) ? await approveQuarantineById(db, id) : { ok: false, error: 'невірний id' };
       await answerCallbackQuery(settings.token, callbackQuery.id, result.ok ? 'Схвалено' : result.error ?? 'помилка');
       await markCallbackMessageProcessed(settings.token, callbackQuery, result.ok ? '✅ Схвалено' : `❌ Помилка: ${result.error ?? 'помилка'}`);
@@ -1577,6 +1994,13 @@ app.post('/webhook/:pathToken', async (c) => {
     }
     if (data.startsWith('lg_unban:')) {
       const id = Number(data.slice('lg_unban:'.length));
+      if (Number.isFinite(id)) {
+        const item = await db.prepare('SELECT chat_id FROM logs WHERE id = ?').bind(id).first<{ chat_id: string | null }>();
+        if (item?.chat_id && !settings.admins.some((admin) => admin.userId === callbackAdminId && admin.chatIds.includes(item.chat_id || ''))) {
+          await answerCallbackQuery(settings.token, callbackQuery.id, 'Цей чат не призначений вам');
+          return c.json({ ok: true, skipped: 'callback_chat_not_assigned' });
+        }
+      }
       const result = Number.isFinite(id)
         ? await unbanFromLogById(db, settings, id, 'telegram_callback')
         : { ok: false, error: 'невірний id' };
@@ -1604,19 +2028,22 @@ app.post('/webhook/:pathToken', async (c) => {
       null,
       `bot status "${status}" in chat ${membershipUpdate.chat.id} (${chatTitle}); changed by ${actor}`,
       {
-        chatId: String(membershipUpdate.chat.id)
+        chatId: String(membershipUpdate.chat.id),
+        chatTitle
       }
     );
     return c.json({ ok: true, action: 'chat_membership_update', chatId: membershipUpdate.chat.id, status });
   }
   const memberUpdate = update.chat_member;
-  if (memberUpdate?.chat?.id && String(memberUpdate.chat.id) === String(settings.chatId)) {
+  if (memberUpdate?.chat?.id) {
+    const chatSettings = getActiveChatSettings(settings, memberUpdate.chat.id);
+    if (!chatSettings) return c.json({ ok: true, skipped: 'unconfigured_chat_member_update' });
     const oldStatus = memberUpdate.old_chat_member?.status ?? '';
     const newStatus = memberUpdate.new_chat_member?.status ?? '';
     const joined = (oldStatus === 'left' || oldStatus === 'kicked') && (newStatus === 'member' || newStatus === 'restricted');
     const joinedUser = memberUpdate.new_chat_member?.user;
     if (joined && joinedUser) {
-      const premodResult = await startPremoderationForUser(c.env, c.executionCtx, db, settings, joinedUser);
+      const premodResult = await startPremoderationForUser(c.env, c.executionCtx, db, chatSettings, joinedUser);
       if (!premodResult.ok) {
         await logAction(
           db,
@@ -1631,7 +2058,8 @@ app.post('/webhook/:pathToken', async (c) => {
               lastName: joinedUser.last_name
             },
             source: 'premoderation',
-            chatId: String(memberUpdate.chat.id)
+            chatId: String(memberUpdate.chat.id),
+            chatTitle: chatSettings.chatTitle
           }
         );
       }
@@ -1645,8 +2073,7 @@ app.post('/webhook/:pathToken', async (c) => {
   // Secret command for admin to test notifications
   if (
     message.chat.type === 'private' &&
-    settings.adminUserId &&
-    String(message.from?.id) === String(settings.adminUserId) &&
+    settings.admins.some((admin) => admin.userId === String(message.from?.id)) &&
     message.text?.trim() === 'Test notifications'
   ) {
     const dummyUser = { id: 12345, username: 'tester', firstName: 'Тест', lastName: 'Користувач' };
@@ -1672,8 +2099,14 @@ app.post('/webhook/:pathToken', async (c) => {
     ];
 
     for (const test of tests) {
-      const { text, buttons } = formatAdminNotification(test.type, test.data);
-      await sendAdminMessage(settings.token, settings.adminUserId, text, buttons);
+      const admin = settings.admins.find((item) => item.userId === String(message.from?.id));
+      const chat = admin?.chatIds[0] ? getActiveChatSettings(settings, admin.chatIds[0]) : null;
+      const { text, buttons } = formatAdminNotification(test.type, {
+        ...test.data,
+        chatTitle: chat?.chatTitle,
+        includeChatName: !!admin && admin.chatIds.length > 1
+      });
+      await sendAdminMessage(settings.token, String(message.from?.id), text, buttons);
     }
 
     await telegramApi(settings.token, 'sendMessage', {
@@ -1684,13 +2117,14 @@ app.post('/webhook/:pathToken', async (c) => {
     return c.json({ ok: true, action: 'test_notifications_sent' });
   }
 
-  if (String(message.chat.id) !== String(settings.chatId)) return c.json({ ok: true, skipped: 'wrong_chat' });
+  const chatSettings = getActiveChatSettings(settings, message.chat.id);
+  if (!chatSettings) return c.json({ ok: true, skipped: 'wrong_chat' });
 
   if (message.new_chat_members?.length) {
-    await deleteMessage(settings.token, settings.chatId, message.message_id);
+    await deleteMessage(settings.token, chatSettings.chatId, message.message_id);
     const results = [];
     for (const member of message.new_chat_members) {
-      const result = await startPremoderationForUser(c.env, c.executionCtx, db, settings, member, message.message_id);
+      const result = await startPremoderationForUser(c.env, c.executionCtx, db, chatSettings, member, message.message_id);
       results.push({ userId: member.id, ...result });
       if (!result.ok) {
         await logAction(
@@ -1707,6 +2141,7 @@ app.post('/webhook/:pathToken', async (c) => {
             },
             source: 'premoderation',
             chatId: String(message.chat.id),
+            chatTitle: chatSettings.chatTitle,
             messageId: message.message_id
           }
         );
@@ -1716,7 +2151,7 @@ app.post('/webhook/:pathToken', async (c) => {
   }
 
   if (message.left_chat_member) {
-    await deleteMessage(settings.token, settings.chatId, message.message_id);
+    await deleteMessage(settings.token, chatSettings.chatId, message.message_id);
     return c.json({ ok: true, action: 'cleanup_left_member_message' });
   }
 
@@ -1725,7 +2160,7 @@ app.post('/webhook/:pathToken', async (c) => {
 
   if (sender?.is_bot) {
     if (text && SYSTEM_CLEANUP_RE.test(text)) {
-      await telegramApi(settings.token, 'deleteMessage', { chat_id: settings.chatId, message_id: message.message_id });
+      await telegramApi(settings.token, 'deleteMessage', { chat_id: chatSettings.chatId, message_id: message.message_id });
       return c.json({ ok: true, action: 'cleanup_system_message' });
     }
     return c.json({ ok: true, skipped: 'bot_message' });
@@ -1750,11 +2185,12 @@ app.post('/webhook/:pathToken', async (c) => {
       lastName: sender.last_name
     },
     messageId: message.message_id,
-    chatId: String(message.chat.id)
+    chatId: String(message.chat.id),
+    chatTitle: chatSettings.chatTitle
   };
 
   if (hardMatchTerms.length > 0) {
-    if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
+    if (await isAdmin(db, chatSettings.token, chatSettings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
 
     if (settings.safeMode) {
       await logAction(
@@ -1769,23 +2205,26 @@ app.post('/webhook/:pathToken', async (c) => {
 
     const banResult = await banAndDelete(
       db,
-      settings.token,
-      settings.chatId,
+      chatSettings.token,
+      chatSettings.chatId,
       message.message_id,
       sender.id,
       'hard_match',
       `hard match by ${userLabel} ${usernamePart}; matched: ${hardMatchTerms.join(', ')}; text: ${text}`,
       { ...metaBase, matchedTerms: hardMatchTerms }
     );
-    if (settings.adminUserId && banResult.logId) {
-      const { text: adminText, buttons } = formatAdminNotification('hard_match', {
-        userLabel,
-        username: sender.username,
-        matchedTerms: hardMatchTerms,
-        text,
-        logId: banResult.logId
+    if (chatSettings.assignedAdminIds.length > 0 && banResult.logId) {
+      await sendAssignedAdminNotifications(chatSettings, (includeChatName) => {
+        return formatAdminNotification('hard_match', {
+          userLabel,
+          username: sender.username,
+          matchedTerms: hardMatchTerms,
+          text,
+          logId: banResult.logId,
+          chatTitle: chatSettings.chatTitle,
+          includeChatName
+        });
       });
-      await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
     }
     return c.json({ ok: true, action: 'ban_delete', matchedTerms: hardMatchTerms });
   }
@@ -1798,8 +2237,8 @@ app.post('/webhook/:pathToken', async (c) => {
     if (reportedText.trim() && reportedUser && !reportedUser.is_bot) {
       let quarantineId: number | null = null;
       const existingRow = await db
-        .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
-        .bind(replied.message_id, reportedUser.id)
+        .prepare('SELECT id FROM quarantine WHERE chat_id = ? AND message_id = ? AND user_id = ?')
+        .bind(chatSettings.chatId, replied.message_id, reportedUser.id)
         .first<{ id: number }>();
 
       if (existingRow?.id) {
@@ -1807,9 +2246,11 @@ app.post('/webhook/:pathToken', async (c) => {
       } else {
         await db
           .prepare(
-            'INSERT INTO quarantine(message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
+            'INSERT INTO quarantine(chat_id, chat_title, message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
           )
           .bind(
+            chatSettings.chatId,
+            chatSettings.chatTitle,
             replied.message_id,
             reportedUser.id,
             reportedUser.username ?? '',
@@ -1824,8 +2265,8 @@ app.post('/webhook/:pathToken', async (c) => {
           )
           .run();
         const row = await db
-          .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
-          .bind(replied.message_id, reportedUser.id)
+          .prepare('SELECT id FROM quarantine WHERE chat_id = ? AND message_id = ? AND user_id = ?')
+          .bind(chatSettings.chatId, replied.message_id, reportedUser.id)
           .first<{ id: number }>();
         quarantineId = row?.id ?? null;
       }
@@ -1858,12 +2299,13 @@ app.post('/webhook/:pathToken', async (c) => {
           reporterMessage,
           messageId: replied.message_id,
           chatId: String(message.chat.id),
+          chatTitle: chatSettings.chatTitle,
           source: 'user_report'
         }
       );
 
-      if (settings.adminUserId && quarantineId) {
-        const { text: adminText, buttons } = formatAdminNotification('user_report', {
+    if (chatSettings.assignedAdminIds.length > 0 && quarantineId) {
+        await sendAssignedAdminNotifications(chatSettings, (includeChatName) => formatAdminNotification('user_report', {
           userLabel: targetLabel, // used for userPart if we want, but user_report has custom fields
           reporterLabel,
           reporterUsername: sender.username,
@@ -1871,9 +2313,10 @@ app.post('/webhook/:pathToken', async (c) => {
           targetLabel,
           targetUsername: reportedUser.username,
           text: reportedText,
-          quarantineId
-        });
-        await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
+          quarantineId,
+          chatTitle: chatSettings.chatTitle,
+          includeChatName
+        }));
       }
       return c.json({ ok: true, action: 'quarantine_report' });
     }
@@ -1884,18 +2327,18 @@ app.post('/webhook/:pathToken', async (c) => {
     return c.json({ ok: true, action: 'allow' });
   }
 
-  if (await isAdmin(db, settings.token, settings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
+  if (await isAdmin(db, chatSettings.token, chatSettings.chatId, sender.id)) return c.json({ ok: true, skipped: 'admin_user' });
 
   const softTerms = softMatch.terms;
   await db
     .prepare(
-      'INSERT INTO quarantine(message_id, user_id, username, first_name, last_name, text) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
+      'INSERT INTO quarantine(chat_id, chat_title, message_id, user_id, username, first_name, last_name, text) VALUES(?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING'
     )
-    .bind(message.message_id, sender.id, sender.username ?? '', sender.first_name ?? '', sender.last_name ?? '', text)
+    .bind(chatSettings.chatId, chatSettings.chatTitle, message.message_id, sender.id, sender.username ?? '', sender.first_name ?? '', sender.last_name ?? '', text)
     .run();
   const quarantineRow = await db
-    .prepare('SELECT id FROM quarantine WHERE message_id = ? AND user_id = ?')
-    .bind(message.message_id, sender.id)
+    .prepare('SELECT id FROM quarantine WHERE chat_id = ? AND message_id = ? AND user_id = ?')
+    .bind(chatSettings.chatId, message.message_id, sender.id)
     .first<{ id: number }>();
   await logAction(
     db,
@@ -1904,15 +2347,18 @@ app.post('/webhook/:pathToken', async (c) => {
     `м'який збіг у ${userLabel} ${usernamePart}; знайдено: ${softTerms.join(', ') || 'немає'}; текст: ${text}`,
     { ...metaBase, matchedTerms: softTerms, source: 'soft_match' }
   );
-  if (settings.adminUserId && quarantineRow?.id) {
-    const { text: adminText, buttons } = formatAdminNotification('soft_match', {
-      userLabel,
-      username: sender.username,
-      matchedTerms: softTerms,
-      text,
-      quarantineId: quarantineRow.id
+  if (chatSettings.assignedAdminIds.length > 0 && quarantineRow?.id) {
+    await sendAssignedAdminNotifications(chatSettings, (includeChatName) => {
+      return formatAdminNotification('soft_match', {
+        userLabel,
+        username: sender.username,
+        matchedTerms: softTerms,
+        text,
+        quarantineId: quarantineRow.id,
+        chatTitle: chatSettings.chatTitle,
+        includeChatName
+      });
     });
-    await sendAdminMessage(settings.token, settings.adminUserId, adminText, buttons);
   }
   return c.json({ ok: true, action: 'quarantine', matchedTerms: softTerms });
 });
@@ -1927,12 +2373,28 @@ app.get('/admin/', async (c) => {
 app.get('/admin/api/settings', async (c) => {
   const db = c.env.DB;
   const token = await getSetting(db, 'TELEGRAM_TOKEN');
-  const chatId = await getSetting(db, 'CHAT_ID');
   const workerUrl = await getSetting(db, 'WORKER_URL');
   const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS'));
   const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
   const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
-  const adminUserId = (await getSetting(db, 'ADMIN_USER_ID')) ?? '';
+  const chatRows = await db.prepare('SELECT chat_id, title FROM bot_chats WHERE enabled = 1 ORDER BY title COLLATE NOCASE, chat_id').all<{ chat_id: string; title: string }>();
+  const chats = (chatRows.results ?? []).map((row) => ({ chatId: row.chat_id, title: row.title || row.chat_id }));
+  const assignmentRows = await db
+    .prepare(
+      `SELECT a.user_id, a.label, aca.chat_id
+       FROM bot_admins a
+       LEFT JOIN admin_chat_assignments aca ON aca.admin_user_id = a.user_id
+       WHERE a.enabled = 1
+       ORDER BY a.user_id, aca.chat_id`
+    )
+    .all<{ user_id: string; label: string; chat_id: string | null }>();
+  const adminMap = new Map<string, ManagedAdmin>();
+  for (const row of assignmentRows.results ?? []) {
+    const admin = adminMap.get(row.user_id) ?? { userId: row.user_id, label: row.label || row.user_id, chatIds: [] };
+    if (row.chat_id) admin.chatIds.push(row.chat_id);
+    adminMap.set(row.user_id, admin);
+  }
+  const admins = Array.from(adminMap.values());
   const premoderationEnabled = (await getSetting(db, 'PREMODERATION_ENABLED')) === '1';
   const timeoutRaw = Number((await getSetting(db, 'PREMODERATION_TIMEOUT_SEC')) ?? '');
   const premoderationTimeoutSec =
@@ -1943,13 +2405,16 @@ app.get('/admin/api/settings', async (c) => {
   return c.json({
     ok: true,
     data: {
-      token: token ?? '',
-      chatId: chatId ?? '',
+      tokenConfigured: !!token,
+      chats,
+      admins,
+      assignments: buildAssignmentRows(chats, admins),
+      chatsText: serializeChatLines(chats),
+      adminsText: serializeAdminLines(admins),
       workerUrl: workerUrl ?? '',
       softKeywords,
       safeMode,
       webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : '',
-      adminUserId,
       premoderationEnabled,
       premoderationTimeoutSec,
       premoderationPrompt
@@ -1959,19 +2424,26 @@ app.get('/admin/api/settings', async (c) => {
 
 app.post('/admin/api/settings', async (c) => {
   const db = c.env.DB;
-  const body = await c.req.json<{ token?: string; chatId?: string; adminUserId?: string; safeMode?: boolean }>();
-  const token = (body.token ?? '').trim();
-  const chatId = (body.chatId ?? '').trim();
-  const adminUserId = (body.adminUserId ?? '').trim();
-  if (!token || !chatId) return jsonError('токен та chatId обов’язкові');
-  if (!/^-?\d+$/u.test(chatId)) return jsonError('chatId має бути числовим');
-  if (adminUserId && !/^\d+$/u.test(adminUserId)) return jsonError('adminUserId має бути числовим');
+  const body = await c.req.json<{ token?: string; assignments?: AssignmentInput[]; chatsText?: string; adminsText?: string; safeMode?: boolean }>();
+  const existingToken = ((await getSetting(db, 'TELEGRAM_TOKEN')) ?? '').trim();
+  const token = (body.token ?? '').trim() || existingToken;
+  const assignmentRows = Array.isArray(body.assignments)
+    ? parseAssignmentRows(body.assignments)
+    : parseChatLines(String(body.chatsText ?? '')).map((chat) => ({ chatId: chat.chatId, adminIds: [] }));
+  if (!token || assignmentRows.length === 0) return jsonError('токен та хоча б одна пара чат/адмін обов’язкові');
 
   const workerUrl = new URL(c.req.url).origin;
-  const { webhook, webhookPathToken } = await upsertCoreSettings(db, token, chatId, workerUrl);
-  await setSetting(db, 'ADMIN_USER_ID', adminUserId);
+  const { webhook, webhookPathToken } = await upsertCoreSettings(db, token, workerUrl);
+  const { chats, admins } = Array.isArray(body.assignments)
+    ? await resolveAssignmentsFromTelegram(token, assignmentRows)
+    : {
+        chats: parseChatLines(String(body.chatsText ?? '')),
+        admins: parseAdminLines(String(body.adminsText ?? ''), new Set(assignmentRows.map((row) => row.chatId)))
+      };
+  if (admins.length === 0) return jsonError('додайте хоча б одного адміна');
+  await replaceChatAdminConfig(db, chats, admins);
   await setSetting(db, 'SAFE_MODE', body.safeMode ? '1' : '0');
-  await logAction(db, 'settings_updated', null, `чат ${chatId}, вебхук ${webhook.ok ? 'успішно' : 'помилка'}, безп. режим ${body.safeMode ? 'увімкнено' : 'вимкнено'}`);
+  await logAction(db, 'settings_updated', null, `чатів ${chats.length}, адмінів ${admins.length}, вебхук ${webhook.ok ? 'успішно' : 'помилка'}, безп. режим ${body.safeMode ? 'увімкнено' : 'вимкнено'}`);
 
   return c.json({
     ok: true,
@@ -1979,7 +2451,10 @@ app.post('/admin/api/settings', async (c) => {
       webhookOk: webhook.ok,
       webhookDescription: webhook.description ?? '',
       webhookPath: `/webhook/${webhookPathToken}`,
-      adminUserId
+      tokenConfigured: true,
+      chats,
+      admins,
+      assignments: buildAssignmentRows(chats, admins)
     }
   });
 });
@@ -2061,7 +2536,7 @@ app.get('/admin/api/quarantine', async (c) => {
   const [rows, totalRow] = await Promise.all([
     c.env.DB
       .prepare(
-        'SELECT id, message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?'
+        'SELECT id, chat_id, chat_title, message_id, user_id, username, first_name, last_name, reporter_user_id, reporter_username, reporter_first_name, reporter_last_name, reporter_message, text, timestamp FROM quarantine ORDER BY id DESC LIMIT ? OFFSET ?'
       )
       .bind(pageSize, offset)
       .all(),
@@ -2111,6 +2586,7 @@ app.get('/admin/api/logs', async (c) => {
     c.env.DB
       .prepare(
         `SELECT id, action, user_id, details, meta_json, timestamp
+         , chat_id, chat_title
          FROM logs
          ${filterSql}
          ORDER BY id DESC
@@ -2159,7 +2635,9 @@ export default {
     for (const msg of batch.messages) {
       const { chatId, challengeToken } = msg.body as { chatId: string, challengeToken: string };
       const settings = await getRuntimeSettings(db);
-      if (!settings || settings.chatId !== chatId) continue;
+      if (!settings) continue;
+      const chatSettings = getActiveChatSettings(settings, chatId);
+      if (!chatSettings) continue;
       const row = await db
         .prepare(
           `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at
@@ -2176,9 +2654,9 @@ export default {
       ) {
         continue;
       }
-      await resolvePremoderationFailure(db, settings, row, 'timeout');
+      await resolvePremoderationFailure(db, chatSettings, row, 'timeout');
       if (row.captcha_message_id) {
-        await editMessageText(settings.token, settings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
+        await editMessageText(settings.token, chatSettings.chatId, row.captcha_message_id, '⛔ Час перевірки вичерпано.', []);
       }
     }
   }
