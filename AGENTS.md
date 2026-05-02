@@ -40,6 +40,7 @@ This project is a sophisticated anti-spam bot for Telegram, designed to run on C
 ### Commands
 
 *   **Installation**: `npm install`
+*   **Admin CSS Build**: `npm run build:css` (Compiles Tailwind CSS for the static admin dashboard asset)
 *   **Local Development**: `npm run dev` (Runs the worker locally using Miniflare).
 *   **Type Generation**: `npm run types` (Generates types for your D1 and Queue bindings).
 *   **Deployment**: `npx wrangler deploy` (Deploys the project to Cloudflare; `npm run deploy` is only a wrapper for this command).
@@ -53,6 +54,7 @@ This project is a sophisticated anti-spam bot for Telegram, designed to run on C
 
 *   **Hono Framework**: Use Hono for all HTTP routing and middleware.
 *   **Admin Static Assets**: Keep dashboard HTML/CSS/JS under `public/admin/`. Do not import admin HTML into `src/index.ts`; the Worker serves the admin shell through `env.ASSETS`.
+*   **Tailwind Usage**: Do not use `cdn.tailwindcss.com` in production. Update Tailwind classes in `public/admin/index.html`, then regenerate `public/admin/tailwind.css` via `npm run build:css`.
 *   **Database Interactions**: Use the D1 binding (`DB`) with prepared statements for safety.
 *   **Error Handling**: API errors should return a JSON response with `{ ok: false, error: "..." }`.
 *   **Localization**: The bot's public messages and dashboard are primarily in Ukrainian.

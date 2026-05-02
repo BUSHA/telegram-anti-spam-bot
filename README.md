@@ -54,6 +54,10 @@
    npm run types
    npx wrangler deploy
    ```
+   Якщо змінювали Tailwind-класи в адмін-панелі, спочатку перебудуйте статичний CSS:
+   ```bash
+   npm run build:css
+   ```
 4. **Налаштування**: Перейдіть за посиланням воркера `/admin`, введіть токен бота та додайте рядки призначень `ID чату` + `ID адміністратора / адміністраторів`.
 
 Щоб знайти ID груп, додайте бота в потрібні чати та напишіть йому в приват:
@@ -85,6 +89,7 @@ This project is a Telegram anti-spam bot built on Cloudflare Workers, using D1 f
 - **Multi-chat Support**: Assign one admin to many chats, many admins to many chats, or many admins to one chat.
 - **Known Chat Discovery**: Admins can send `/chats` to the bot privately to list non-private chats seen by the bot.
 - **Modern Dashboard**: Real-time logs, blacklist management, quarantine moderation, and multi-chat assignment management.
+- **Production Tailwind Build**: Dashboard styles are compiled into a static CSS asset instead of loading `cdn.tailwindcss.com` at runtime.
 - **Write-only Token UI**: The bot token is not returned to the dashboard after it is saved.
 - **Cloudflare Zero Trust**: Protect the dashboard with Cloudflare Access.
 

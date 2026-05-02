@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Антиспам: панель керування</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/admin/tailwind.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%232563eb'%3E%3Cpath d='M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z'%2F%3E%3C%2Fsvg%3E">
     <style>
@@ -13,9 +13,14 @@
       body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 0; }
       .glass-panel { background: rgba(30, 41, 59, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
       .card-row { background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); }
-      .btn { transition: background-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; }
+      .btn { transition: background-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+      .hidden.btn { display: none; }
       .btn:hover { opacity: 0.9; box-shadow: 0 0 10px rgba(255,255,255,0.1); }
       .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      @media (min-width: 48rem) {
+        .md\:inline-flex.btn { display: inline-flex; }
+        .md\:hidden.btn { display: none; }
+      }
       .input-field { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.15); color: #f8fafc; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
       .input-field:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
       .input-field::placeholder { color: #475569; }
@@ -41,7 +46,7 @@
       @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
       @keyframes toastOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(10px); } }
       
-      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
+      .tab-section { display: none; animation: fadeIn 0.3s ease-out; flex: 1; flex-direction: column; min-height: 0; }
       .tab-section.active { display: flex; }
       
       @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -62,7 +67,7 @@
             <svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z" fill="currentColor"/></svg>
           </div>
           <h1 class="text-xl sm:text-2xl font-bold tracking-tight gradient-text">Антиспам</h1>
-          <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.3.1</span>
+          <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 border border-slate-600 text-slate-400">v0.4</span>
         </div>
         <div class="flex items-center gap-3">
           <span id="safeModeBadge" class="hidden px-3 py-1 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-400 border border-amber-400/30 shadow-[0_0_15px_rgba(251,191,36,0.1)]">БЕЗПЕКА</span>

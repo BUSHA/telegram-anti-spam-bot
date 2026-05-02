@@ -19,6 +19,7 @@
 
 ```bash
 npm install
+npm run build:css
 npm run types
 ```
 
@@ -94,6 +95,7 @@ run_worker_first = ["/admin", "/admin/", "/admin/api/*", "/webhook", "/webhook/*
 Розгорніть проект:
 
 ```bash
+npm run build:css
 npx tsc --noEmit
 npx wrangler deploy --dry-run
 npx wrangler deploy
