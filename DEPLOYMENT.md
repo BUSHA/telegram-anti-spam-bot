@@ -7,8 +7,8 @@
 - Акаунт Cloudflare з увімкненими Workers + D1 (достатньо безкоштовного плану)
 - Встановлені Node.js 18+ та npm
 - Токен Telegram-бота від `@BotFather`
-- Група в Telegram, куди додано бота
-- Бот має права адміністратора в групі:
+- Одна або кілька груп/супергруп Telegram, куди додано бота
+- Бот має права адміністратора в кожному чаті, який він модеруватиме:
   - Видалення повідомлень (Delete messages)
   - Бан користувачів (Ban users)
   - Читання повідомлень (Read group messages)
@@ -85,6 +85,8 @@ npx wrangler queues create anti-spam-delay-queue
 Розгорніть проект:
 
 ```bash
+npx tsc --noEmit
+npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
 
@@ -94,7 +96,7 @@ npx wrangler deploy
 
 Бот використовуватиме цю адресу для налаштування вебхука Telegram.
 
-## 8. Налаштування Telegram-бота та групи
+## 8. Налаштування Telegram-бота та груп
 
 ### 8.1 Отримання токена бота
 
@@ -104,16 +106,28 @@ npx wrangler deploy
 2. Вкажіть ім'я та юзернейм
 3. Скопіюйте токен (формату `123456:ABC...`)
 
-### 8.2 Додавання бота в групу
+### 8.2 Додавання бота в групи
 
-Додайте бота до цільової групи та надайте йому права адміністратора:
+Додайте бота до кожної цільової групи/супергрупи та надайте йому права адміністратора:
 
 - Видалення повідомлень
 - Бан користувачів
 
 ### 8.3 Отримання ID чату
 
-Використовуйте один із методів:
+Рекомендований спосіб — використати самого бота:
+
+1. Задеплойте воркер.
+2. Додайте бота в потрібні групи.
+3. Напишіть боту в приват:
+
+```text
+/chats
+```
+
+Бот покаже список не приватних чатів, які він бачив, разом з їх ID. Якщо чат не з'явився, видаліть і повторно додайте бота або надішліть повідомлення в цьому чаті, яке бот може отримати.
+
+Альтернативні способи:
 
 - Бот `@RawDataBot` (додайте його в групу)
 - Метод `getUpdates` у Telegram API
@@ -126,18 +140,30 @@ npx wrangler deploy
 
 - `https://<ваша-адреса-воркера>/admin`
 
-У розділі **System Setup** (Системні налаштування) введіть:
+У розділі **Налаштування системи** введіть:
 
-- Bot Token
-- Target Chat ID
+- токен бота;
+- один або кілька рядків призначень:
+  - `ID чату`
+  - `ID адміністратора / адміністраторів`
 
-Натисніть **Save & Set Webhook**.
+В одному рядку можна вказати один ID чату та одного або кількох адміністраторів через кому. Наприклад:
+
+```text
+ID чату: -1001234567890
+ID адміністратора / адміністраторів: 123456789, 987654321
+```
+
+Натисніть **Зберегти та встановити вебхук**.
 
 Це виконає такі дії:
 
-1. Збереже налаштування в D1 (`TELEGRAM_TOKEN`, `CHAT_ID`, `WORKER_URL`)
-2. Створить та захешує `WEBHOOK_SECRET`
+1. Збереже токен бота, URL воркера, список чатів, адміністраторів та їх призначення в D1.
+2. Створить `WEBHOOK_SECRET`, якщо він ще не існує.
 3. Викличе метод Telegram `setWebhook` для підключення бота до вашого воркера з валідацією токена.
+4. Спробує отримати назви чатів через Telegram `getChat` та імена адміністраторів через `getChatMember`.
+
+Токен бота не показується після збереження. Щоб залишити поточний токен, залиште поле токена порожнім.
 
 ## 10. Захист `/admin` через Cloudflare Zero Trust
 
@@ -214,8 +240,74 @@ npm run types
 Передеплой після змін у коді:
 
 ```bash
+npx tsc --noEmit
+npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
+
+### Безпечний деплой існуючого production-воркера
+
+Перед змінами, що зачіпають D1-схему або поведінку модерації:
+
+1. Перевірте, що працюєте з правильною базою:
+
+```bash
+npx wrangler d1 info telegram_antispam
+```
+
+2. Збережіть timestamp для можливого Time Travel rollback:
+
+```bash
+date -u +"%Y-%m-%dT%H:%M:%SZ"
+```
+
+3. Перевірте, що Time Travel може знайти стан за цим timestamp:
+
+```bash
+npx wrangler d1 time-travel info telegram_antispam --timestamp "PASTE_TIMESTAMP_HERE"
+```
+
+4. Зробіть SQL export як додаткову копію:
+
+```bash
+mkdir -p backups
+npx wrangler d1 export telegram_antispam --remote --output backups/telegram_antispam_before_deploy.sql
+```
+
+5. Перевірте код і виконайте dry run:
+
+```bash
+npx tsc --noEmit
+npx wrangler deploy --dry-run
+```
+
+6. Задеплойте:
+
+```bash
+npx wrangler deploy
+```
+
+7. Викличте health check, щоб воркер виконав `ensureSchema()`:
+
+```bash
+curl https://<ваша-адреса-воркера>/health
+```
+
+8. Перевірте ключові таблиці:
+
+```bash
+npx wrangler d1 execute telegram_antispam --remote --command "SELECT chat_id, title FROM bot_chats;"
+npx wrangler d1 execute telegram_antispam --remote --command "SELECT admin_user_id, chat_id FROM admin_chat_assignments;"
+npx wrangler d1 execute telegram_antispam --remote --command "SELECT value FROM settings WHERE key='QUARANTINE_CHAT_UNIQUE_MIGRATED';"
+```
+
+Якщо потрібен rollback D1:
+
+```bash
+npx wrangler d1 time-travel restore telegram_antispam --timestamp "PASTE_TIMESTAMP_HERE"
+```
+
+Ця команда перезаписує remote D1 стан, тому використовуйте її лише якщо проблема саме в даних/міграції.
 
 За потреби можна переглянути дані D1 через консоль:
 
@@ -238,98 +330,29 @@ npx wrangler d1 execute telegram_antispam --remote --command "SELECT * FROM logs
 ## 15. Нотатки з безпеки
 
 - Ніколи не зберігайте токен бота у відкритому коді
+- Токен у панелі керування є write-only: API не повертає збережене значення токена
 - У разі витоку токена — відкличте його у `@BotFather` та оновіть в налаштуваннях панелі
 - Обмежуйте доступ до `/admin/*` лише для довірених осіб
 
 ---
 
-# Telegram Anti-Spam Bot: Setup and Deployment Guide (English)
+# Telegram Anti-Spam Bot: Setup and Deployment Guide (English Summary)
 
-This guide covers first-time setup and production deployment for the Cloudflare Workers + D1 Telegram anti-spam bot.
+The Ukrainian section above is the source of truth for operations. In short:
 
-## 1. Prerequisites
-
-- Cloudflare account with Workers + D1 enabled (free tier is sufficient)
-- Node.js 18+ and npm installed
-- A Telegram bot token from `@BotFather`
-- Target Telegram group where the bot is already added
-- Bot has admin permissions in that group:
-  - Delete messages
-  - Ban users
-  - Read group messages
-
-## 2. Project Install
-
-From the project root:
+- Create D1 and Queue with Wrangler.
+- Apply `schema.sql` for first setup.
+- Deploy with:
 
 ```bash
-npm install
-npm run types
-```
-
-`npm run types` generates `worker-configuration.d.ts` (required for IDE/runtime types).
-
-## 3. Cloudflare Auth
-
-Authenticate Wrangler:
-
-```bash
-npx wrangler login
-```
-
-Verify:
-
-```bash
-npx wrangler whoami
-```
-
-## 4. Create D1 Database
-
-Create DB:
-
-```bash
-npx wrangler d1 create telegram_antispam
-```
-
-Copy the returned `database_id` and put it into [wrangler.toml](wrangler.toml):
-
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "telegram_antispam"
-database_id = "PASTE_REAL_DATABASE_ID_HERE"
-```
-
-## 5. Run First Migration
-
-### Recommended (Wrangler local schema file execution)
-
-```bash
-npx wrangler d1 execute telegram_antispam --remote --file=schema.sql
-```
-
-## 6. Create Delay Queue
-
-Create the queue required for pre-moderation processing:
-
-```bash
-npx wrangler queues create anti-spam-delay-queue
-```
-
-## 7. Deploy Worker
-
-Deploy:
-
-```bash
+npx tsc --noEmit
+npx wrangler deploy --dry-run
 npx wrangler deploy
 ```
 
-After deploy, note your Worker URL, for example:
-
-`https://telegram-anti-spam-bot.<subdomain>.workers.dev`
-
-The bot uses this URL for Telegram webhook setup.
-
-## 8. Telegram Bot and Group Setup
-
-... (Refer to Ukrainian section for full steps or the original doc)
+- Configure the bot in `/admin`.
+- Add one or more assignment rows: chat ID plus one or more admin IDs.
+- Leave the token field empty when saving if you do not want to rotate the stored token.
+- To discover group/supergroup IDs, add the bot to chats and send `/chats` to the bot privately.
+- Protect `/admin/*` with Cloudflare Access.
+- For existing production deployments, export D1 and record a Time Travel timestamp before deploy.

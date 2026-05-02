@@ -1,6 +1,6 @@
 # Telegram Anti-Spam Bot (Cloudflare Workers + D1 + Queues)
 
-Цей проект — простий антиспам-бот для Telegram, що працює на Cloudflare Workers, використовує D1 для бази даних та Queues для надійної обробки капчі. Для невеликого чату вистачить лімітів безкоштовного плану.
+Цей проект — антиспам-бот для Telegram, що працює на Cloudflare Workers, використовує D1 для бази даних та Queues для надійної обробки капчі. Бот підтримує кілька чатів і гнучке призначення адміністраторів.
 
 ![Dashboard Screenshot](Screenshot.png)
 
@@ -15,11 +15,19 @@
   - Надійне керування таймаутами через Cloudflare Queues (навіть якщо воркер перезапуститься, капча буде оброблена).
   - Тимчасове обмеження прав користувача (read-only) до проходження перевірки.
 - **Безпечний режим (Safe Mode)**: Можливість тестувати фільтри в "сухому" режимі — повідомлення не видаляються, а користувачі не баняться (система лише записує, що б вона зробила).
+- **Підтримка кількох чатів**:
+  - Один бот може працювати в кількох групах/супергрупах.
+  - Один адміністратор може бути призначений до кількох чатів.
+  - Кілька адміністраторів можуть бути призначені до одного або кількох чатів.
+  - У логах, історії, карантині та звітах показується назва чату.
+  - Telegram-сповіщення містять назву чату лише тоді, коли конкретний адміністратор має більше одного призначеного чату.
+- **Пошук ID чатів**: Адміністратор може написати боту в приват `/chats`, щоб отримати список не приватних чатів, які бот бачив після додавання або отримання повідомлення.
 - **Зручна Адмін-панель**: 
   - Перегляд історії дій у реальному часі.
   - Керування чорним списком та стоп-словами.
   - Модерація карантину (схвалення або видалення повідомлень).
   - Гнучкі налаштування капчі та системних параметрів.
+- **Безпечне зберігання токена**: Токен Telegram-бота не показується в UI після збереження. Поле токена в адмін-панелі є write-only: залиште його порожнім, щоб не змінювати збережене значення.
 - **Локалізація**: Повна підтримка української мови для повідомлень у чаті та інтерфейсу керування.
 
 ## Технологічний стек
@@ -46,7 +54,13 @@
    npm run types
    npx wrangler deploy
    ```
-4. **Налаштування**: Перейдіть за посиланням воркера `/admin` і введіть токен бота та ID чату.
+4. **Налаштування**: Перейдіть за посиланням воркера `/admin`, введіть токен бота та додайте рядки призначень `ID чату` + `ID адміністратора / адміністраторів`.
+
+Щоб знайти ID груп, додайте бота в потрібні чати та напишіть йому в приват:
+
+```text
+/chats
+```
 
 ## Безпека адмін-панелі
 
@@ -56,7 +70,7 @@
 
 # Telegram Anti-Spam Bot (English)
 
-This project is a powerful Telegram anti-spam bot built on Cloudflare Workers, using D1 for database and Queues for robust captcha processing. For a small chat, the free plan limits are sufficient.
+This project is a Telegram anti-spam bot built on Cloudflare Workers, using D1 for database and Queues for robust captcha processing. It supports multiple chats and per-admin chat assignments.
 
 ![Dashboard Screenshot](Screenshot.png)
 
@@ -68,7 +82,10 @@ This project is a powerful Telegram anti-spam bot built on Cloudflare Workers, u
   - **Quarantine (Soft match)**: Suspicious messages are held for manual review in the dashboard.
 - **Pre-moderation (Captcha)**: New users must solve a simple text-based captcha. Powered by Cloudflare Queues for reliable timeout handling.
 - **Safe Mode**: Test your settings without actually deleting messages or banning users.
-- **Modern Dashboard**: Real-time logs, blacklist management, and quarantine moderation.
+- **Multi-chat Support**: Assign one admin to many chats, many admins to many chats, or many admins to one chat.
+- **Known Chat Discovery**: Admins can send `/chats` to the bot privately to list non-private chats seen by the bot.
+- **Modern Dashboard**: Real-time logs, blacklist management, quarantine moderation, and multi-chat assignment management.
+- **Write-only Token UI**: The bot token is not returned to the dashboard after it is saved.
 - **Cloudflare Zero Trust**: Protect the dashboard with Cloudflare Access.
 
 Refer to [DEPLOYMENT.md](DEPLOYMENT.md) for detailed setup instructions.
