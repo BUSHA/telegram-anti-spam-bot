@@ -35,7 +35,7 @@
 - **Core**: [Hono](https://hono.dev/) на Cloudflare Workers.
 - **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite).
 - **Background Tasks**: [Cloudflare Queues](https://developers.cloudflare.com/queues/) для таймаутів капчі.
-- **UI**: Vanilla JS + Tailwind CSS.
+- **UI**: Vanilla JS + Tailwind CSS, розгортається як Cloudflare Workers Static Assets з `public/admin/index.html`.
 - **Security**: Інтеграція з Cloudflare Zero Trust (Access) для захисту панелі керування.
 
 ## Швидкий запуск
@@ -64,7 +64,7 @@
 
 ## Безпека адмін-панелі
 
-Проект спеціально не містить внутрішньої системи логіну. Шлях `/admin/*` **обов'язково** має бути захищений через Cloudflare Access (Application + Policy). Це надійніше і дозволяє використовувати ваші існуючі identity-провайдери.
+Проект спеціально не містить внутрішньої системи логіну. Шляхи `/admin` та `/admin/*` **обов'язково** мають бути захищені через Cloudflare Access (Application + Policy). Це надійніше і дозволяє використовувати ваші існуючі identity-провайдери.
 
 ---
 

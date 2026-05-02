@@ -30,3 +30,6 @@ Thumbs.db
 
 # Local Wrangler config override
 wrangler.toml
+
+# backups
+backups/

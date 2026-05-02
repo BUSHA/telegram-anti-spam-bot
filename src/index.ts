@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import ADMIN_HTML from './dashboard.html';
 
 type Env = {
   DB: D1Database;
   DELAY_QUEUE: Queue<{ chatId: string; challengeToken: string }>;
+  ASSETS: Fetcher;
 };
 
 type TelegramResponse<T> = {
@@ -2461,9 +2461,15 @@ app.post('/webhook/:pathToken', async (c) => {
 
 app.post('/webhook', (c) => jsonError('not_found', 404));
 
+async function serveAdminShell(c: { req: { url: string }; env: Env }): Promise<Response> {
+  const url = new URL(c.req.url);
+  url.pathname = '/admin/index.html';
+  return c.env.ASSETS.fetch(new Request(url, { method: 'GET' }));
+}
+
 app.get('/admin/', async (c) => {
   await purgeOldLogs(c.env.DB);
-  return c.html(ADMIN_HTML);
+  return serveAdminShell(c);
 });
 
 app.get('/admin/api/settings', async (c) => {
@@ -2721,7 +2727,7 @@ app.post('/admin/api/logs/:id/unban', async (c) => {
 
 app.get('/admin', async (c) => {
   await purgeOldLogs(c.env.DB);
-  return c.html(ADMIN_HTML);
+  return serveAdminShell(c);
 });
 
 export default {

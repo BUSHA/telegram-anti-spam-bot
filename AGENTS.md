@@ -7,7 +7,7 @@ This project is a sophisticated anti-spam bot for Telegram, designed to run on C
 *   **Core Logic**: Built with [Hono](https://hono.dev/) on Cloudflare Workers.
 *   **Data Persistence**: Uses [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite) to store settings, configured chats, admin-chat assignments, discovered chats, blacklists, quarantine messages, logs, and pre-moderation states.
 *   **Async Processing**: Utilizes [Cloudflare Queues](https://developers.cloudflare.com/queues/) for reliable captcha timeout handling.
-*   **Admin Dashboard**: A built-in SPA (`src/dashboard.html`) for managing the bot, hosted at the `/admin` path of the worker.
+*   **Admin Dashboard**: A built-in SPA (`public/admin/index.html`) for managing the bot, served as Cloudflare Workers Static Assets at the `/admin` path.
 *   **Language**: TypeScript.
 
 ### Key Features
@@ -25,7 +25,7 @@ This project is a sophisticated anti-spam bot for Telegram, designed to run on C
 ## Project Structure
 
 *   `src/index.ts`: The main entry point containing the Hono app, Telegram webhook handlers, API routes for the dashboard, and Queue consumer logic.
-*   `src/dashboard.html`: A single-file administrative interface using Vanilla JS and Tailwind CSS.
+*   `public/admin/index.html`: A single-file administrative interface using Vanilla JS and Tailwind CSS, deployed through the Worker `ASSETS` binding.
 *   `schema.sql`: Defines the database structure for D1.
 *   `wrangler.toml.example`: Template for Cloudflare configuration (D1, Queues, and general settings).
 *   `worker-configuration.d.ts`: TypeScript definitions for environment bindings.
@@ -52,10 +52,11 @@ This project is a sophisticated anti-spam bot for Telegram, designed to run on C
 ## Development Conventions
 
 *   **Hono Framework**: Use Hono for all HTTP routing and middleware.
+*   **Admin Static Assets**: Keep dashboard HTML/CSS/JS under `public/admin/`. Do not import admin HTML into `src/index.ts`; the Worker serves the admin shell through `env.ASSETS`.
 *   **Database Interactions**: Use the D1 binding (`DB`) with prepared statements for safety.
 *   **Error Handling**: API errors should return a JSON response with `{ ok: false, error: "..." }`.
 *   **Localization**: The bot's public messages and dashboard are primarily in Ukrainian.
-*   **Security**: The `/admin/*` routes should be protected via Cloudflare Access (Zero Trust) in production, as the worker does not implement internal authentication.
+*   **Security**: The `/admin` and `/admin/*` routes should be protected via Cloudflare Access (Zero Trust) in production, as the worker does not implement internal authentication.
 *   **Normalization**: Always use `normalizeText` and `normalizeForPhraseMatch` when comparing user input against blacklists or keywords.
 *   **Multi-chat Data Model**:
     *   `bot_chats` contains chats configured for moderation in the admin panel.

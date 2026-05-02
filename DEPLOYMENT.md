@@ -82,6 +82,15 @@ npx wrangler queues create anti-spam-delay-queue
 
 ## 7. Деплой воркера
 
+Адмін-панель лежить у `public/admin/index.html` і деплоїться разом із воркером як Cloudflare Workers Static Assets. У `wrangler.toml` має бути секція:
+
+```toml
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/admin", "/admin/", "/admin/api/*", "/webhook", "/webhook/*", "/health", "/favicon.ico"]
+```
+
 Розгорніть проект:
 
 ```bash
@@ -167,12 +176,12 @@ ID адміністратора / адміністраторів: 123456789, 987
 
 ## 10. Захист `/admin` через Cloudflare Zero Trust
 
-Цей проект свідомо не має вбудованої системи логіну. Захистіть шлях `/admin/*` за допомогою Cloudflare Access.
+Цей проект свідомо не має вбудованої системи логіну. Захистіть шляхи `/admin` та `/admin/*` за допомогою Cloudflare Access.
 
 1. Cloudflare Dashboard -> Zero Trust -> Access -> Applications -> Add application
 2. Тип: **Self-hosted**
 3. Домен: адреса вашого воркера
-4. Path (шлях): `/admin/*`
+4. Path (шлях): додайте правила для `/admin` та `/admin/*`
 5. Додайте політику (Policy):
    - Action: Allow
    - Include: ваш email або група провайдера ідентифікації
