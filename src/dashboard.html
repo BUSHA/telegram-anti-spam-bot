@@ -457,12 +457,12 @@
         div.className = 'assignment-row grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end bg-slate-900/35 border border-slate-700/50 rounded-xl p-3';
         div.innerHTML =
           '<div>' +
-            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Chat ID</label>' +
+            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">ID чату</label>' +
             '<input class="assignment-chat input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="-1001234567890" value="' + esc(row.chatId || '') + '" />' +
             '<div class="assignment-chat-title min-h-[1rem] text-[11px] text-sky-300 mt-1 truncate">' + esc(row.chatTitle || '') + '</div>' +
           '</div>' +
           '<div>' +
-            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Admin ID / IDs</label>' +
+            '<label class="block text-[10px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">ID адміністратора / адміністраторів</label>' +
             '<input class="assignment-admins input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456789, 987654321" value="' + esc(row.adminIds || '') + '" />' +
             '<div class="assignment-admin-labels min-h-[1rem] text-[11px] text-emerald-300 mt-1 truncate">' + esc(row.adminLabels || '') + '</div>' +
           '</div>' +
@@ -687,8 +687,28 @@
       }
  
       function actionTitle(action) {
-        const titles = { ban_delete: 'Бан та видалення', ban_delete_partial: 'Частковий бан/видалення', quarantine: 'Карантин', quarantine_report: 'Скарга на спам', premod_started: 'Пре-модерацію розпочато', premod_passed: 'Пре-модерацію пройдено', premod_failed: 'Пре-модерацію провалено', premod_error: 'Помилка пре-модерації', premod_settings_updated: 'Конфіг пре-модерації', unban: 'Розбанити' };
-        return titles[action] || action;
+        const titles = {
+          ban_delete: 'Бан та видалення',
+          ban_delete_partial: 'Частковий бан/видалення',
+          dry_run_hard_match: 'Безпечний режим: чорний список',
+          dry_run_manual_review: 'Безпечний режим: ручна перевірка',
+          quarantine: 'Карантин',
+          quarantine_report: 'Скарга на спам',
+          quarantine_approved: 'Схвалено з черги',
+          premod_started: 'Пре-модерацію розпочато',
+          premod_passed: 'Пре-модерацію пройдено',
+          premod_failed: 'Пре-модерацію провалено',
+          premod_error: 'Помилка пре-модерації',
+          premod_settings_updated: 'Налаштування пре-модерації',
+          settings_updated: 'Налаштування оновлено',
+          soft_keywords_updated: 'Ключові слова оновлено',
+          blacklist_add: 'Чорний список оновлено',
+          blacklist_delete: 'Чорний список змінено',
+          log_deleted: 'Лог видалено',
+          chat_membership_update: 'Статус бота в чаті',
+          unban: 'Розбанено'
+        };
+        return titles[action] || 'Системна дія';
       }
  
       function actionColor(action) {

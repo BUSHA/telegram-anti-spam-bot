@@ -919,6 +919,28 @@ function formatChatLabel(chat: TelegramChat): string {
   return `${name}${username}`;
 }
 
+function formatTelegramChatStatus(status: string): string {
+  const statuses: Record<string, string> = {
+    creator: 'власник',
+    administrator: 'адміністратор',
+    member: 'учасник',
+    restricted: 'обмежений',
+    left: 'вийшов',
+    kicked: 'видалений'
+  };
+  return statuses[status] || status || 'невідомо';
+}
+
+function formatTelegramChatType(type: string): string {
+  const types: Record<string, string> = {
+    private: 'приватний чат',
+    group: 'група',
+    supergroup: 'супергрупа',
+    channel: 'канал'
+  };
+  return types[type] || type || 'чат';
+}
+
 function formatAdminNotification(
   type: 'premod_failure' | 'hard_match' | 'user_report' | 'soft_match',
   data: {
@@ -1272,7 +1294,7 @@ async function resolvePremoderationSuccess(
   const nowIso = new Date().toISOString();
 
   const unmuteRes = await restoreUserPermissions(settings.token, settings.chatId, row.user_id);
-  if (!unmuteRes.ok) return { ok: false, error: unmuteRes.description ?? 'failed to remove restriction' };
+  if (!unmuteRes.ok) return { ok: false, error: unmuteRes.description ?? 'не вдалося зняти обмеження' };
 
   await db
     .prepare('UPDATE premoderation_challenges SET status = ?, resolved_at = ? WHERE id = ?')
@@ -1394,7 +1416,7 @@ async function startPremoderationForUser(
 
   const restrictRes = await restrictUserReadOnly(settings.token, settings.chatId, user.id);
   if (!restrictRes.ok) {
-    return { ok: false, error: restrictRes.description ?? 'failed to restrict user' };
+    return { ok: false, error: restrictRes.description ?? 'не вдалося обмежити користувача' };
   }
 
   const correctDigit = PREMOD_MIN_NUMBER + randomInt(PREMOD_MAX_NUMBER - PREMOD_MIN_NUMBER + 1);
@@ -1445,7 +1467,7 @@ async function startPremoderationForUser(
     )
     .bind(challengeToken)
     .first<PremodChallengeRow>();
-  if (!row) return { ok: false, error: 'challenge insert failed' };
+  if (!row) return { ok: false, error: 'не вдалося створити перевірку' };
 
   const { html, plain } = buildPremoderationPrompt(
     settings.premoderationPrompt,
@@ -1467,7 +1489,7 @@ async function startPremoderationForUser(
   if (!sendRes.ok || !sendRes.result?.message_id) {
     await restoreUserPermissions(settings.token, settings.chatId, user.id);
     await db.prepare('DELETE FROM premoderation_challenges WHERE id = ?').bind(row.id).run();
-    return { ok: false, error: sendRes.description ?? 'failed to send captcha message' };
+    return { ok: false, error: sendRes.description ?? 'не вдалося надіслати повідомлення капчі' };
   }
 
   await db
@@ -1675,15 +1697,15 @@ async function banDeleteQuarantineById(
       last_name: string | null;
       text: string;
     }>();
-  if (!row) return { ok: false, error: 'not found' };
+  if (!row) return { ok: false, error: 'запис уже оброблено або видалено' };
   const activeSettings = getActiveChatSettings(settings, row.chat_id);
-  if (!activeSettings) return { ok: false, error: 'chat is not configured' };
+  if (!activeSettings) return { ok: false, error: 'чат не налаштовано' };
 
   const fullName = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim();
   const details = `ручний бан за результатами перевірки користувача ${fullName || row.user_id}${row.username ? ` (@${row.username})` : ''}; текст: ${row.text}`;
 
   if (settings.safeMode) {
-    await logAction(db, 'dry_run_manual_review', row.user_id, `SAFE MODE: would ban/delete from review queue; ${details}`, {
+    await logAction(db, 'dry_run_manual_review', row.user_id, `БЕЗПЕЧНИЙ РЕЖИМ: бот лише імітував би бан/видалення з черги; ${details}`, {
       messageText: row.text,
       user: {
         id: row.user_id,
@@ -1718,7 +1740,7 @@ async function banDeleteQuarantineById(
 
 async function approveQuarantineById(db: D1Database, id: number): Promise<{ ok: boolean; error?: string }> {
   const existing = await db.prepare('SELECT id, chat_id, chat_title FROM quarantine WHERE id = ?').bind(id).first<{ id: number; chat_id: string | null; chat_title: string | null }>();
-  if (!existing) return { ok: false, error: 'not found' };
+  if (!existing) return { ok: false, error: 'запис уже оброблено або видалено' };
   await db.prepare('DELETE FROM quarantine WHERE id = ?').bind(id).run();
   await logAction(db, 'quarantine_approved', null, `схвалено пункт черги ${id}`, {
     chatId: existing.chat_id ?? undefined,
@@ -1737,7 +1759,7 @@ async function unbanFromLogById(
     .prepare('SELECT id, action, user_id, details, meta_json FROM logs WHERE id = ?')
     .bind(id)
     .first<{ id: number; action: string; user_id: number | null; details: string | null; meta_json: string | null }>();
-  if (!row) return { ok: false, error: 'not found' };
+  if (!row) return { ok: false, error: 'запис не знайдено' };
   if (row.action !== 'ban_delete' && row.action !== 'ban_delete_partial' && row.action !== 'premod_failed') {
     return { ok: false, error: 'розбан доступний тільки для записів про бан' };
   }
@@ -1755,7 +1777,7 @@ async function unbanFromLogById(
 
   const chatId = meta.chatId || '';
   const activeSettings = getActiveChatSettings(settings, chatId);
-  if (!activeSettings) return { ok: false, error: 'chat is not configured' };
+  if (!activeSettings) return { ok: false, error: 'чат не налаштовано' };
 
   const unbanRes = await telegramApi<boolean>(settings.token, 'unbanChatMember', {
     chat_id: activeSettings.chatId,
@@ -1995,7 +2017,7 @@ app.post('/webhook/:pathToken', async (c) => {
       }
 
       const passResult = await resolvePremoderationSuccess(db, chatSettings, row);
-      await answerCallbackQuery(settings.token, callbackQuery.id, passResult.ok ? 'Перевірку пройдено' : passResult.error ?? 'failed');
+      await answerCallbackQuery(settings.token, callbackQuery.id, passResult.ok ? 'Перевірку пройдено' : passResult.error ?? 'помилка');
       return c.json({ ok: passResult.ok, action: 'premod_pass', error: passResult.error });
     }
 
@@ -2057,19 +2079,19 @@ app.post('/webhook/:pathToken', async (c) => {
 
   const membershipUpdate = update.my_chat_member;
   if (membershipUpdate?.chat?.id && membershipUpdate.new_chat_member?.user?.is_bot) {
-    const chatTitle = membershipUpdate.chat.title || membershipUpdate.chat.username || '(untitled)';
+    const chatTitle = membershipUpdate.chat.title || membershipUpdate.chat.username || '(без назви)';
     const actor = membershipUpdate.from
       ? `${membershipUpdate.from.first_name ?? ''} ${membershipUpdate.from.last_name ?? ''}`.trim() ||
         membershipUpdate.from.username ||
         String(membershipUpdate.from.id)
-      : 'unknown';
+      : 'невідомо';
     const status = membershipUpdate.new_chat_member.status || 'unknown';
     await upsertKnownChat(db, membershipUpdate.chat, status);
     await logAction(
       db,
       'chat_membership_update',
       null,
-      `bot status "${status}" in chat ${membershipUpdate.chat.id} (${chatTitle}); changed by ${actor}`,
+      `статус бота "${formatTelegramChatStatus(status)}" у чаті ${membershipUpdate.chat.id} (${chatTitle}); змінив ${actor}`,
       {
         chatId: String(membershipUpdate.chat.id),
         chatTitle
@@ -2092,7 +2114,7 @@ app.post('/webhook/:pathToken', async (c) => {
           db,
           'premod_error',
           joinedUser.id,
-          `failed to start pre-moderation for ${joinedUser.id}: ${premodResult.error ?? 'unknown error'}`,
+          `не вдалося розпочати пре-модерацію для ${joinedUser.id}: ${premodResult.error ?? 'невідома помилка'}`,
           {
             user: {
               id: joinedUser.id,
@@ -2174,8 +2196,8 @@ app.post('/webhook/:pathToken', async (c) => {
           '<b>Відомі чати бота</b>',
           ...list.map((row) => {
             const marker = row.is_member ? '✅' : '⚪';
-            const status = row.bot_status ? `, ${row.bot_status}` : '';
-            const type = row.type ? ` (${row.type}${status})` : '';
+            const status = row.bot_status ? `, ${formatTelegramChatStatus(row.bot_status)}` : '';
+            const type = row.type ? ` (${formatTelegramChatType(row.type)}${status})` : '';
             return `${marker} ${esc(row.title || row.chat_id)}${esc(type)}\n<code>${esc(row.chat_id)}</code>`;
           })
         ].join('\n\n')
@@ -2205,7 +2227,7 @@ app.post('/webhook/:pathToken', async (c) => {
           db,
           'premod_error',
           member.id,
-          `failed to start pre-moderation for ${member.id}: ${result.error ?? 'unknown error'}`,
+          `не вдалося розпочати пре-модерацію для ${member.id}: ${result.error ?? 'невідома помилка'}`,
           {
             user: {
               id: member.id,
@@ -2271,7 +2293,7 @@ app.post('/webhook/:pathToken', async (c) => {
         db,
         'dry_run_hard_match',
         sender.id,
-        `SAFE MODE: would ban/delete user ${userLabel} ${usernamePart}; matched: ${hardMatchTerms.join(', ')}; text: ${text}`,
+        `БЕЗПЕЧНИЙ РЕЖИМ: бот лише імітував би бан/видалення користувача ${userLabel} ${usernamePart}; збіг: ${hardMatchTerms.join(', ')}; текст: ${text}`,
         { ...metaBase, matchedTerms: hardMatchTerms, source: 'hard_match_dry_run' }
       );
       return c.json({ ok: true, action: 'dry_run_hard_match', matchedTerms: hardMatchTerms });
@@ -2600,7 +2622,7 @@ app.post('/admin/api/blacklist/sync', async (c) => {
   }
   await c.env.DB.batch(batch);
   BLACKLIST_CACHE.delete('global');
-  await logAction(c.env.DB, 'blacklist_add', null, `synced ${patterns.length} patterns`);
+  await logAction(c.env.DB, 'blacklist_add', null, `синхронізовано правил чорного списку: ${patterns.length}`);
   return c.json({ ok: true });
 });
 
@@ -2621,20 +2643,20 @@ app.get('/admin/api/quarantine', async (c) => {
 
 app.post('/admin/api/quarantine/:id/ban-delete', async (c) => {
   const settings = await getRuntimeSettings(c.env.DB);
-  if (!settings) return jsonError('system is not configured', 503);
+  if (!settings) return jsonError('система не налаштована', 503);
 
   const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) return jsonError('invalid id');
+  if (!Number.isFinite(id)) return jsonError('некоректний id');
   const result = await banDeleteQuarantineById(c.env.DB, settings, id);
-  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
+  if (!result.ok) return jsonError(result.error ?? 'помилка', result.error?.includes('не знайдено') || result.error?.includes('видалено') ? 404 : 400);
   return c.json({ ok: true });
 });
 
 app.post('/admin/api/quarantine/:id/approve', async (c) => {
   const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) return jsonError('invalid id');
+  if (!Number.isFinite(id)) return jsonError('некоректний id');
   const result = await approveQuarantineById(c.env.DB, id);
-  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
+  if (!result.ok) return jsonError(result.error ?? 'помилка', result.error?.includes('не знайдено') || result.error?.includes('видалено') ? 404 : 400);
   return c.json({ ok: true });
 });
 
@@ -2676,24 +2698,24 @@ app.get('/admin/api/logs', async (c) => {
 
 app.delete('/admin/api/logs/:id', async (c) => {
   const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) return jsonError('invalid id');
+  if (!Number.isFinite(id)) return jsonError('некоректний id');
 
   const existing = await c.env.DB.prepare('SELECT id FROM logs WHERE id = ?').bind(id).first<{ id: number }>();
-  if (!existing) return jsonError('not found', 404);
+  if (!existing) return jsonError('запис не знайдено', 404);
 
   await c.env.DB.prepare('DELETE FROM logs WHERE id = ?').bind(id).run();
-  await logAction(c.env.DB, 'log_deleted', null, `deleted history item ${id}`);
+  await logAction(c.env.DB, 'log_deleted', null, `видалено запис історії ${id}`);
   return c.json({ ok: true });
 });
 
 app.post('/admin/api/logs/:id/unban', async (c) => {
   const id = Number(c.req.param('id'));
-  if (!Number.isFinite(id)) return jsonError('invalid id');
+  if (!Number.isFinite(id)) return jsonError('некоректний id');
 
   const settings = await getRuntimeSettings(c.env.DB);
-  if (!settings) return jsonError('system is not configured', 503);
+  if (!settings) return jsonError('система не налаштована', 503);
   const result = await unbanFromLogById(c.env.DB, settings, id, 'dashboard');
-  if (!result.ok) return jsonError(result.error ?? 'failed', result.error === 'not found' ? 404 : 400);
+  if (!result.ok) return jsonError(result.error ?? 'помилка', result.error?.includes('не знайдено') ? 404 : 400);
   return c.json({ ok: true });
 });
 
