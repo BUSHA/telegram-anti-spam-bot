@@ -466,7 +466,7 @@
             '<input class="assignment-admins input-field rounded-lg p-3 w-full text-sm font-mono" placeholder="123456789, 987654321" value="' + esc(row.adminIds || '') + '" />' +
             '<div class="assignment-admin-labels min-h-[1rem] text-[11px] text-emerald-300 mt-1 truncate">' + esc(row.adminLabels || '') + '</div>' +
           '</div>' +
-          '<button type="button" class="assignment-remove btn px-3 py-3 bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 rounded-lg border border-slate-700 hover:border-rose-500/40" title="Видалити">' +
+          '<button type="button" class="assignment-remove btn w-11 h-11 p-0 self-start md:mt-[1.15rem] bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 rounded-lg border border-slate-700 hover:border-rose-500/40" title="Видалити">' +
             '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
           '</button>';
         div.querySelector('.assignment-remove').addEventListener('click', () => {
