@@ -12,9 +12,11 @@ type TelegramResponse<T> = {
   description?: string;
 };
 
+type TelegramChat = { id: number; type: string; title?: string; username?: string; first_name?: string; last_name?: string };
+
 type TelegramMessage = {
   message_id: number;
-  chat: { id: number; type: string };
+  chat: TelegramChat;
   from?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
   new_chat_members?: Array<{ id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean }>;
   left_chat_member?: { id: number; username?: string; first_name?: string; last_name?: string; is_bot?: boolean };
@@ -320,6 +322,21 @@ async function ensureSchema(db: D1Database): Promise<void> {
             title TEXT NOT NULL DEFAULT '',
             enabled INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+          )`
+        )
+        .run();
+
+      await db
+        .prepare(
+          `CREATE TABLE IF NOT EXISTS known_chats (
+            chat_id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            type TEXT NOT NULL DEFAULT '',
+            username TEXT NOT NULL DEFAULT '',
+            bot_status TEXT NOT NULL DEFAULT '',
+            is_member INTEGER NOT NULL DEFAULT 1,
+            first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
           )`
         )
@@ -637,6 +654,25 @@ async function setSetting(db: D1Database, key: string, value: string): Promise<v
   RUNTIME_SETTINGS_CACHE.expiresAt = 0;
 }
 
+async function upsertKnownChat(db: D1Database, chat: TelegramChat, status = 'member'): Promise<void> {
+  const title = formatChatLabel(chat);
+  const isMember = status !== 'left' && status !== 'kicked' ? 1 : 0;
+  await db
+    .prepare(
+      `INSERT INTO known_chats(chat_id, title, type, username, bot_status, is_member, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ON CONFLICT(chat_id) DO UPDATE SET
+         title = excluded.title,
+         type = excluded.type,
+         username = excluded.username,
+         bot_status = excluded.bot_status,
+         is_member = excluded.is_member,
+         updated_at = excluded.updated_at`
+    )
+    .bind(String(chat.id), title, chat.type || '', chat.username || '', status, isMember)
+    .run();
+}
+
 async function logAction(
   db: D1Database,
   action: string,
@@ -875,6 +911,12 @@ function esc(str: string | number | undefined | null): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function formatChatLabel(chat: TelegramChat): string {
+  const name = chat.title || chat.username || `${chat.first_name ?? ''} ${chat.last_name ?? ''}`.trim() || String(chat.id);
+  const username = chat.username ? ` @${chat.username}` : '';
+  return `${name}${username}`;
 }
 
 function formatAdminNotification(
@@ -2022,6 +2064,7 @@ app.post('/webhook/:pathToken', async (c) => {
         String(membershipUpdate.from.id)
       : 'unknown';
     const status = membershipUpdate.new_chat_member.status || 'unknown';
+    await upsertKnownChat(db, membershipUpdate.chat, status);
     await logAction(
       db,
       'chat_membership_update',
@@ -2117,6 +2160,37 @@ app.post('/webhook/:pathToken', async (c) => {
     return c.json({ ok: true, action: 'test_notifications_sent' });
   }
 
+  if (
+    message.chat.type === 'private' &&
+    settings.admins.some((admin) => admin.userId === String(message.from?.id)) &&
+    /^\/?(chats|chatids|chat_ids|чати)$/iu.test(message.text?.trim() || '')
+  ) {
+    const rows = await db
+      .prepare('SELECT chat_id, title, type, bot_status, is_member FROM known_chats ORDER BY updated_at DESC, title COLLATE NOCASE')
+      .all<{ chat_id: string; title: string; type: string; bot_status: string; is_member: number }>();
+    const list = rows.results ?? [];
+    const text = list.length
+      ? [
+          '<b>Відомі чати бота</b>',
+          ...list.map((row) => {
+            const marker = row.is_member ? '✅' : '⚪';
+            const status = row.bot_status ? `, ${row.bot_status}` : '';
+            const type = row.type ? ` (${row.type}${status})` : '';
+            return `${marker} ${esc(row.title || row.chat_id)}${esc(type)}\n<code>${esc(row.chat_id)}</code>`;
+          })
+        ].join('\n\n')
+      : 'Бот ще не бачив жодного чату. Додайте його в групу, потім повторіть команду.';
+    await telegramApi(settings.token, 'sendMessage', {
+      chat_id: message.chat.id,
+      text,
+      parse_mode: 'HTML'
+    });
+    return c.json({ ok: true, action: 'known_chats_sent' });
+  }
+
+  if (message.chat.type !== 'private') {
+    await upsertKnownChat(db, message.chat, 'member');
+  }
   const chatSettings = getActiveChatSettings(settings, message.chat.id);
   if (!chatSettings) return c.json({ ok: true, skipped: 'wrong_chat' });
 

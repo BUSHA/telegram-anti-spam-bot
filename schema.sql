@@ -11,6 +11,17 @@ CREATE TABLE IF NOT EXISTS bot_chats (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS known_chats (
+  chat_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT '',
+  username TEXT NOT NULL DEFAULT '',
+  bot_status TEXT NOT NULL DEFAULT '',
+  is_member INTEGER NOT NULL DEFAULT 1,
+  first_seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS bot_admins (
   user_id TEXT PRIMARY KEY,
   label TEXT NOT NULL DEFAULT '',
