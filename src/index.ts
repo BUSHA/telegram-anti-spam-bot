@@ -1469,7 +1469,7 @@ async function startPremoderationForUser(
     .first<PremodChallengeRow>();
   if (!row) return { ok: false, error: 'не вдалося створити перевірку' };
 
-  const { html, plain } = buildPremoderationPrompt(
+  const { html } = buildPremoderationPrompt(
     settings.premoderationPrompt,
     user.id,
     user.username,
@@ -1496,25 +1496,6 @@ async function startPremoderationForUser(
     .prepare('UPDATE premoderation_challenges SET captcha_message_id = ? WHERE id = ?')
     .bind(sendRes.result.message_id, row.id)
     .run();
-  await logAction(
-    db,
-    'premod_started',
-    user.id,
-    `пре-модерацію розпочато для ${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() +
-      `${user.username ? ` (@${user.username})` : ''}; завдання: ${plain}`,
-    {
-      user: {
-        id: user.id,
-        username: user.username,
-        firstName: user.first_name,
-        lastName: user.last_name
-      },
-      source: 'premoderation',
-      chatId: settings.chatId,
-      chatTitle: settings.chatTitle,
-      messageId: sendRes.result.message_id
-    }
-  );
   schedulePremoderationTimeout(env, ctx, settings.chatId, challengeToken, timeoutSec);
   return { ok: true };
 }
@@ -2681,8 +2662,8 @@ app.get('/admin/api/logs', async (c) => {
   const includeSystem = new URL(c.req.url).searchParams.get('includeSystem') === '1';
 
   const filterSql = includeSystem
-    ? ''
-    : `WHERE action NOT IN ('settings_updated', 'blacklist_add', 'blacklist_delete', 'soft_keywords_updated', 'premod_settings_updated', 'log_deleted')`;
+    ? `WHERE action != 'premod_started'`
+    : `WHERE action NOT IN ('settings_updated', 'blacklist_add', 'blacklist_delete', 'soft_keywords_updated', 'premod_settings_updated', 'log_deleted', 'premod_started')`;
 
   const [rows, totalRow] = await Promise.all([
     c.env.DB
