@@ -178,6 +178,21 @@ const UA_NUMBER_WORDS: Record<number, string> = {
 };
 const PREMOD_MIN_NUMBER = 1;
 const PREMOD_MAX_NUMBER = 30;
+const PROJECT_GITHUB_URL = 'https://github.com/BUSHA/telegram-anti-spam-bot';
+
+type AdminChatStartStats = {
+  chatId: string;
+  title: string;
+  knownType: string;
+  botStatus: string;
+  isMember: boolean;
+  pendingQuarantine: number;
+  bans7d: number;
+  quarantine7d: number;
+  premodPassed7d: number;
+  premodFailed7d: number;
+  pendingPremoderation: number;
+};
 
 function formatFriendlyDate(date: Date): string {
   const months = ['Січня', 'Лютого', 'Березня', 'Квітня', 'Травня', 'Червня', 'Липня', 'Серпня', 'Вересня', 'Жовтня', 'Листопада', 'Грудня'];
@@ -939,6 +954,143 @@ function formatTelegramChatType(type: string): string {
     channel: 'канал'
   };
   return types[type] || type || 'чат';
+}
+
+function numberFromStat(value: unknown): number {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+}
+
+async function getAdminStartChatStats(db: D1Database, assignedChats: ManagedChat[]): Promise<AdminChatStartStats[]> {
+  if (assignedChats.length === 0) return [];
+  const chatIds = assignedChats.map((chat) => chat.chatId);
+  const placeholders = chatIds.map(() => '?').join(', ');
+
+  const [knownRows, quarantineRows, logRows, premodRows] = await Promise.all([
+    db
+      .prepare(`SELECT chat_id, type, bot_status, is_member FROM known_chats WHERE chat_id IN (${placeholders})`)
+      .bind(...chatIds)
+      .all<{ chat_id: string; type: string; bot_status: string; is_member: number }>(),
+    db
+      .prepare(`SELECT chat_id, COUNT(*) AS pending_quarantine FROM quarantine WHERE chat_id IN (${placeholders}) GROUP BY chat_id`)
+      .bind(...chatIds)
+      .all<{ chat_id: string; pending_quarantine: number }>(),
+    db
+      .prepare(
+        `SELECT chat_id,
+          SUM(CASE WHEN action IN ('ban_delete', 'ban_delete_partial', 'dry_run_hard_match', 'dry_run_manual_review') THEN 1 ELSE 0 END) AS bans_7d,
+          SUM(CASE WHEN action IN ('quarantine', 'quarantine_report') THEN 1 ELSE 0 END) AS quarantine_7d,
+          SUM(CASE WHEN action = 'premod_passed' THEN 1 ELSE 0 END) AS premod_passed_7d,
+          SUM(CASE WHEN action = 'premod_failed' THEN 1 ELSE 0 END) AS premod_failed_7d
+         FROM logs
+         WHERE chat_id IN (${placeholders})
+           AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
+         GROUP BY chat_id`
+      )
+      .bind(...chatIds)
+      .all<{
+        chat_id: string;
+        bans_7d: number | null;
+        quarantine_7d: number | null;
+        premod_passed_7d: number | null;
+        premod_failed_7d: number | null;
+      }>(),
+    db
+      .prepare(
+        `SELECT chat_id, SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_premoderation
+         FROM premoderation_challenges
+         WHERE chat_id IN (${placeholders})
+         GROUP BY chat_id`
+      )
+      .bind(...chatIds)
+      .all<{ chat_id: string; pending_premoderation: number | null }>()
+  ]);
+
+  const knownByChat = new Map((knownRows.results ?? []).map((row) => [row.chat_id, row]));
+  const quarantineByChat = new Map((quarantineRows.results ?? []).map((row) => [row.chat_id, row]));
+  const logsByChat = new Map((logRows.results ?? []).map((row) => [row.chat_id, row]));
+  const premodByChat = new Map((premodRows.results ?? []).map((row) => [row.chat_id, row]));
+
+  return assignedChats.map((chat) => {
+    const known = knownByChat.get(chat.chatId);
+    const quarantine = quarantineByChat.get(chat.chatId);
+    const logs = logsByChat.get(chat.chatId);
+    const premod = premodByChat.get(chat.chatId);
+    return {
+      chatId: chat.chatId,
+      title: chat.title || chat.chatId,
+      knownType: known?.type ?? '',
+      botStatus: known?.bot_status ?? '',
+      isMember: known ? known.is_member === 1 : true,
+      pendingQuarantine: numberFromStat(quarantine?.pending_quarantine),
+      bans7d: numberFromStat(logs?.bans_7d),
+      quarantine7d: numberFromStat(logs?.quarantine_7d),
+      premodPassed7d: numberFromStat(logs?.premod_passed_7d),
+      premodFailed7d: numberFromStat(logs?.premod_failed_7d),
+      pendingPremoderation: numberFromStat(premod?.pending_premoderation)
+    };
+  });
+}
+
+function buildStartMessage(admin: ManagedAdmin | undefined, chatStats: AdminChatStartStats[]): string {
+  const intro = [
+    '<b>Telegram Anti-Spam Bot</b>',
+    'Я допомагаю модераторам прибирати спам у Telegram-чатах: чорний список, карантин підозрілих повідомлень, скарги користувачів і captcha для нових учасників.',
+    `Код бота: <a href="${PROJECT_GITHUB_URL}">GitHub</a>.`
+  ];
+
+  if (!admin) return intro.join('\n\n');
+
+  const total = chatStats.reduce(
+    (acc, row) => ({
+      pendingQuarantine: acc.pendingQuarantine + row.pendingQuarantine,
+      bans7d: acc.bans7d + row.bans7d,
+      quarantine7d: acc.quarantine7d + row.quarantine7d,
+      premodPassed7d: acc.premodPassed7d + row.premodPassed7d,
+      premodFailed7d: acc.premodFailed7d + row.premodFailed7d,
+      pendingPremoderation: acc.pendingPremoderation + row.pendingPremoderation
+    }),
+    { pendingQuarantine: 0, bans7d: 0, quarantine7d: 0, premodPassed7d: 0, premodFailed7d: 0, pendingPremoderation: 0 }
+  );
+  const activeChatCount = chatStats.filter((row) => row.isMember).length;
+  const visibleStats = chatStats.slice(0, 20);
+  const hiddenCount = Math.max(0, chatStats.length - visibleStats.length);
+
+  const adminLines = [
+    `<b>Адмін-панель для ${esc(admin.label || admin.userId)}</b>`,
+    `Призначені чати: ${chatStats.length}; бот у чаті: ${activeChatCount}.`,
+    [
+      '<b>Статистика ваших чатів</b>',
+      `Черга: ${total.pendingQuarantine}`,
+      `За 7 днів: банів/видалень ${total.bans7d}, карантин ${total.quarantine7d}, captcha пройдено ${total.premodPassed7d}, captcha провалено ${total.premodFailed7d}`,
+      `Активні captcha зараз: ${total.pendingPremoderation}`
+    ].join('\n')
+  ];
+
+  if (visibleStats.length > 0) {
+    adminLines.push(
+      [
+        '<b>Ваші чати</b>',
+        ...visibleStats.map((row) => {
+          const marker = row.isMember ? '✅' : '⚪';
+          const status = row.botStatus ? `, ${formatTelegramChatStatus(row.botStatus)}` : '';
+          const type = row.knownType ? ` (${formatTelegramChatType(row.knownType)}${status})` : '';
+          return [
+            `${marker} ${esc(row.title)}${esc(type)}`,
+            `<code>${esc(row.chatId)}</code>`,
+            `Черга: ${row.pendingQuarantine}; 7 днів: банів ${row.bans7d}, карантин ${row.quarantine7d}, captcha ${row.premodPassed7d}/${row.premodFailed7d}; активні captcha: ${row.pendingPremoderation}`
+          ].join('\n');
+        }),
+        hiddenCount > 0 ? `\n...ще ${hiddenCount} чатів приховано, щоб повідомлення не було занадто довгим.` : ''
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    );
+  } else {
+    adminLines.push('У вас поки немає призначених чатів.');
+  }
+
+  return [...intro, ...adminLines].join('\n\n');
 }
 
 function formatAdminNotification(
@@ -2234,30 +2386,35 @@ app.post('/webhook/:pathToken', async (c) => {
 
   if (
     message.chat.type === 'private' &&
-    settings.admins.some((admin) => admin.userId === String(message.from?.id)) &&
-    /^\/?(chats|chatids|chat_ids|чати)$/iu.test(message.text?.trim() || '')
+    /^\/start(?:@\w+)?(?:\s|$)/iu.test(message.text?.trim() || '')
   ) {
-    const rows = await db
-      .prepare('SELECT chat_id, title, type, bot_status, is_member FROM known_chats ORDER BY updated_at DESC, title COLLATE NOCASE')
-      .all<{ chat_id: string; title: string; type: string; bot_status: string; is_member: number }>();
-    const list = rows.results ?? [];
-    const text = list.length
-      ? [
-          '<b>Відомі чати бота</b>',
-          ...list.map((row) => {
-            const marker = row.is_member ? '✅' : '⚪';
-            const status = row.bot_status ? `, ${formatTelegramChatStatus(row.bot_status)}` : '';
-            const type = row.type ? ` (${formatTelegramChatType(row.type)}${status})` : '';
-            return `${marker} ${esc(row.title || row.chat_id)}${esc(type)}\n<code>${esc(row.chat_id)}</code>`;
-          })
-        ].join('\n\n')
-      : 'Бот ще не бачив жодного чату. Додайте його в групу, потім повторіть команду.';
+    const admin = settings.admins.find((item) => item.userId === String(message.from?.id));
+    const assignedChats = admin
+      ? settings.chats.filter((chat) => admin.chatIds.includes(chat.chatId))
+      : [];
+    const stats = admin ? await getAdminStartChatStats(db, assignedChats) : [];
+    const text = buildStartMessage(admin, stats);
     await telegramApi(settings.token, 'sendMessage', {
       chat_id: message.chat.id,
       text,
-      parse_mode: 'HTML'
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
     });
-    return c.json({ ok: true, action: 'known_chats_sent' });
+    return c.json({ ok: true, action: admin ? 'admin_start_sent' : 'start_sent' });
+  }
+
+  if (
+    message.chat.type === 'private' &&
+    settings.admins.some((admin) => admin.userId === String(message.from?.id)) &&
+    /^\/?(chats|chatids|chat_ids|чати)(?:@\w+)?(?:\s|$)/iu.test(message.text?.trim() || '')
+  ) {
+    await telegramApi(settings.token, 'sendMessage', {
+      chat_id: message.chat.id,
+      text: 'Команда /chats застаріла. Використовуйте /start: там є ваші призначені чати та статистика тільки по них.',
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
+    return c.json({ ok: true, action: 'deprecated_chats_command' });
   }
 
   if (message.chat.type !== 'private') {
