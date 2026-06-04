@@ -1212,6 +1212,7 @@ type PremodChallengeRow = {
   correct_digit: number;
   status: string;
   failure_reason: string | null;
+  resolved_at?: string | null;
   expires_at: string;
 };
 
@@ -1374,6 +1375,70 @@ async function cleanupJoinMessagesForUser(
   }
 }
 
+async function findBlockingPremoderationChallenge(
+  db: D1Database,
+  chatId: string,
+  userId: number
+): Promise<PremodChallengeRow | null> {
+  const recentFailureCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  return db
+    .prepare(
+      `SELECT id, chat_id, user_id, username, first_name, last_name, join_message_id, captcha_message_id, challenge_token, correct_digit, status, failure_reason, expires_at, resolved_at
+       FROM premoderation_challenges
+       WHERE chat_id = ? AND user_id = ? AND (
+         status = 'pending'
+         OR (status = 'failed' AND resolved_at IS NOT NULL AND resolved_at >= ?)
+       )
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+    .bind(chatId, userId, recentFailureCutoff)
+    .first<PremodChallengeRow>();
+}
+
+async function deletePremoderationBlockedMessage(
+  db: D1Database,
+  settings: ActiveChatSettings,
+  message: TelegramMessage,
+  row: PremodChallengeRow
+): Promise<void> {
+  const sender = message.from;
+  const text = (message.text ?? message.caption ?? '').trim();
+  const deleteRes = await telegramApi<boolean>(settings.token, 'deleteMessage', {
+    chat_id: settings.chatId,
+    message_id: message.message_id
+  });
+  const label = sender
+    ? `${sender.first_name ?? ''} ${sender.last_name ?? ''}`.trim() || String(sender.id)
+    : String(row.user_id);
+  await logAction(
+    db,
+    'premod_blocked_message',
+    row.user_id,
+    `видалено повідомлення від користувача під час пре-модерації: ${label}; статус=${row.status}; видалення=${deleteRes.ok ? 'успішно' : 'помилка'}${deleteRes.description ? ` (${deleteRes.description})` : ''}${text ? `; текст: ${text}` : ''}`,
+    {
+      messageText: text || undefined,
+      user: sender
+        ? {
+            id: sender.id,
+            username: sender.username,
+            firstName: sender.first_name,
+            lastName: sender.last_name
+          }
+        : {
+            id: row.user_id,
+            username: row.username ?? undefined,
+            firstName: row.first_name ?? undefined,
+            lastName: row.last_name ?? undefined
+          },
+      source: 'premoderation_block',
+      messageId: message.message_id,
+      chatId: settings.chatId,
+      chatTitle: settings.chatTitle
+    }
+  );
+}
+
 function schedulePremoderationTimeout(
   env: Env,
   ctx: any,
@@ -1413,11 +1478,6 @@ async function startPremoderationForUser(
     .bind(settings.chatId, user.id)
     .first<PremodChallengeRow>();
   if (existing) return { ok: true, skipped: 'already_pending' };
-
-  const restrictRes = await restrictUserReadOnly(settings.token, settings.chatId, user.id);
-  if (!restrictRes.ok) {
-    return { ok: false, error: restrictRes.description ?? 'не вдалося обмежити користувача' };
-  }
 
   const correctDigit = PREMOD_MIN_NUMBER + randomInt(PREMOD_MAX_NUMBER - PREMOD_MIN_NUMBER + 1);
   const digits = new Set<number>([correctDigit]);
@@ -1468,6 +1528,15 @@ async function startPremoderationForUser(
     .bind(challengeToken)
     .first<PremodChallengeRow>();
   if (!row) return { ok: false, error: 'не вдалося створити перевірку' };
+
+  const restrictRes = await restrictUserReadOnly(settings.token, settings.chatId, user.id);
+  if (!restrictRes.ok) {
+    await db
+      .prepare('UPDATE premoderation_challenges SET status = ?, failure_reason = ?, resolved_at = ? WHERE id = ?')
+      .bind('failed', restrictRes.description ?? 'не вдалося обмежити користувача', new Date().toISOString(), row.id)
+      .run();
+    return { ok: false, error: restrictRes.description ?? 'не вдалося обмежити користувача' };
+  }
 
   const { html } = buildPremoderationPrompt(
     settings.premoderationPrompt,
@@ -2244,6 +2313,11 @@ app.post('/webhook/:pathToken', async (c) => {
   }
 
   if (!sender) return c.json({ ok: true, skipped: 'no_sender' });
+  const premodBlock = await findBlockingPremoderationChallenge(db, chatSettings.chatId, sender.id);
+  if (premodBlock) {
+    await deletePremoderationBlockedMessage(db, chatSettings, message, premodBlock);
+    return c.json({ ok: true, action: 'premod_blocked_message' });
+  }
   if (!text.trim()) return c.json({ ok: true, skipped: 'no_text' });
 
   const normalized = normalizeText(text);
