@@ -102,6 +102,7 @@ type RuntimeSettings = {
   secret: string;
   softKeywords: string[];
   safeMode: boolean;
+  publicStartMessage: string;
   webhookPathToken: string;
   botUsername: string;
   premoderationEnabled: boolean;
@@ -179,6 +180,8 @@ const UA_NUMBER_WORDS: Record<number, string> = {
 const PREMOD_MIN_NUMBER = 1;
 const PREMOD_MAX_NUMBER = 30;
 const PROJECT_GITHUB_URL = 'https://github.com/BUSHA/telegram-anti-spam-bot';
+const DEFAULT_PUBLIC_START_MESSAGE =
+  `Telegram Anti-Spam Bot\n\nДопомагаю модераторам прибирати спам у Telegram-чатах: чорний список, карантин підозрілих повідомлень, скарги користувачів і captcha для нових учасників.\n\nКод бота: ${PROJECT_GITHUB_URL}`;
 
 type AdminChatStartStats = {
   chatId: string;
@@ -1032,14 +1035,8 @@ async function getAdminStartChatStats(db: D1Database, assignedChats: ManagedChat
   });
 }
 
-function buildStartMessage(admin: ManagedAdmin | undefined, chatStats: AdminChatStartStats[]): string {
-  const intro = [
-    '<b>Telegram Anti-Spam Bot</b>',
-    'Я допомагаю модераторам прибирати спам у Telegram-чатах: чорний список, карантин підозрілих повідомлень, скарги користувачів і captcha для нових учасників.',
-    `Код бота: <a href="${PROJECT_GITHUB_URL}">GitHub</a>.`
-  ];
-
-  if (!admin) return intro.join('\n\n');
+function buildStartMessage(publicMessage: string, admin: ManagedAdmin | undefined, chatStats: AdminChatStartStats[]): string {
+  if (!admin) return publicMessage;
 
   const total = chatStats.reduce(
     (acc, row) => ({
@@ -1090,7 +1087,7 @@ function buildStartMessage(admin: ManagedAdmin | undefined, chatStats: AdminChat
     adminLines.push('У вас поки немає призначених чатів.');
   }
 
-  return [...intro, ...adminLines].join('\n\n');
+  return adminLines.join('\n\n');
 }
 
 function formatAdminNotification(
@@ -1728,12 +1725,13 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   }
 
   const rows = await db
-    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .prepare('SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .bind(
       'TELEGRAM_TOKEN',
       'WEBHOOK_SECRET',
       'SOFT_SUSPICIOUS_KEYWORDS',
       'SAFE_MODE',
+      'PUBLIC_START_MESSAGE',
       'WEBHOOK_PATH_TOKEN',
       'BOT_USERNAME',
       'PREMODERATION_ENABLED',
@@ -1749,6 +1747,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
   const secret = (map.get('WEBHOOK_SECRET') ?? '').trim();
   const softKeywords = parseSoftKeywords(map.get('SOFT_SUSPICIOUS_KEYWORDS') ?? null);
   const safeMode = (map.get('SAFE_MODE') ?? '0').trim() === '1';
+  const publicStartMessage = (map.get('PUBLIC_START_MESSAGE') ?? '').trim() || DEFAULT_PUBLIC_START_MESSAGE;
   const webhookPathToken = (map.get('WEBHOOK_PATH_TOKEN') ?? '').trim();
   const botUsername = (map.get('BOT_USERNAME') ?? '').trim().toLowerCase();
   const premoderationEnabled = (map.get('PREMODERATION_ENABLED') ?? '0').trim() === '1';
@@ -1795,6 +1794,7 @@ async function getRuntimeSettings(db: D1Database): Promise<RuntimeSettings | nul
     secret,
     softKeywords,
     safeMode,
+    publicStartMessage,
     webhookPathToken,
     botUsername,
     premoderationEnabled,
@@ -2393,13 +2393,14 @@ app.post('/webhook/:pathToken', async (c) => {
       ? settings.chats.filter((chat) => admin.chatIds.includes(chat.chatId))
       : [];
     const stats = admin ? await getAdminStartChatStats(db, assignedChats) : [];
-    const text = buildStartMessage(admin, stats);
-    await telegramApi(settings.token, 'sendMessage', {
+    const text = buildStartMessage(settings.publicStartMessage, admin, stats);
+    const payload: Record<string, unknown> = {
       chat_id: message.chat.id,
       text,
-      parse_mode: 'HTML',
       disable_web_page_preview: true
-    });
+    };
+    if (admin) payload.parse_mode = 'HTML';
+    await telegramApi(settings.token, 'sendMessage', payload);
     return c.json({ ok: true, action: admin ? 'admin_start_sent' : 'start_sent' });
   }
 
@@ -2690,6 +2691,7 @@ app.get('/admin/api/settings', async (c) => {
   const workerUrl = await getSetting(db, 'WORKER_URL');
   const softKeywords = parseSoftKeywords(await getSetting(db, 'SOFT_SUSPICIOUS_KEYWORDS'));
   const safeMode = (await getSetting(db, 'SAFE_MODE')) === '1';
+  const publicStartMessage = ((await getSetting(db, 'PUBLIC_START_MESSAGE')) ?? '').trim() || DEFAULT_PUBLIC_START_MESSAGE;
   const webhookPathToken = (await getSetting(db, 'WEBHOOK_PATH_TOKEN')) ?? '';
   const chatRows = await db.prepare('SELECT chat_id, title FROM bot_chats WHERE enabled = 1 ORDER BY title COLLATE NOCASE, chat_id').all<{ chat_id: string; title: string }>();
   const chats = (chatRows.results ?? []).map((row) => ({ chatId: row.chat_id, title: row.title || row.chat_id }));
@@ -2728,6 +2730,7 @@ app.get('/admin/api/settings', async (c) => {
       workerUrl: workerUrl ?? '',
       softKeywords,
       safeMode,
+      publicStartMessage,
       webhookPath: webhookPathToken ? `/webhook/${webhookPathToken}` : '',
       premoderationEnabled,
       premoderationTimeoutSec,
@@ -2738,7 +2741,14 @@ app.get('/admin/api/settings', async (c) => {
 
 app.post('/admin/api/settings', async (c) => {
   const db = c.env.DB;
-  const body = await c.req.json<{ token?: string; assignments?: AssignmentInput[]; chatsText?: string; adminsText?: string; safeMode?: boolean }>();
+  const body = await c.req.json<{
+    token?: string;
+    assignments?: AssignmentInput[];
+    chatsText?: string;
+    adminsText?: string;
+    safeMode?: boolean;
+    publicStartMessage?: string;
+  }>();
   const existingToken = ((await getSetting(db, 'TELEGRAM_TOKEN')) ?? '').trim();
   const token = (body.token ?? '').trim() || existingToken;
   const assignmentRows = Array.isArray(body.assignments)
@@ -2755,8 +2765,11 @@ app.post('/admin/api/settings', async (c) => {
         admins: parseAdminLines(String(body.adminsText ?? ''), new Set(assignmentRows.map((row) => row.chatId)))
       };
   if (admins.length === 0) return jsonError('додайте хоча б одного адміна');
+  const publicStartMessage = String(body.publicStartMessage ?? '').trim() || DEFAULT_PUBLIC_START_MESSAGE;
+  if (publicStartMessage.length > 3000) return jsonError('публічне повідомлення задовге');
   await replaceChatAdminConfig(db, chats, admins);
   await setSetting(db, 'SAFE_MODE', body.safeMode ? '1' : '0');
+  await setSetting(db, 'PUBLIC_START_MESSAGE', publicStartMessage);
   await logAction(db, 'settings_updated', null, `чатів ${chats.length}, адмінів ${admins.length}, вебхук ${webhook.ok ? 'успішно' : 'помилка'}, безп. режим ${body.safeMode ? 'увімкнено' : 'вимкнено'}`);
 
   return c.json({
